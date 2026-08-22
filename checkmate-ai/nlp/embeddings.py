@@ -20,7 +20,6 @@ class HuggingFaceInferenceEmbeddings(Embeddings):
         self.client = client
         self.model = model
         self.batch_size = 10
-        self.executor = ThreadPoolExecutor(max_workers=self.batch_size)
 
     def _embed_text_sync(self, text: str) -> List[float]:
         """동기 방식의 임베딩 생성 (API 호출)"""
@@ -75,11 +74,6 @@ class HuggingFaceInferenceEmbeddings(Embeddings):
         """단일 쿼리에 대한 임베딩 생성"""
         # 동기 방식으로 직접 처리
         return self._embed_text_sync(text)
-
-    def __del__(self):
-        """리소스 정리"""
-        if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=True)
 
 def init_embedding_model() -> Tuple[Any, int]:
     """임베딩 모델 초기화"""
