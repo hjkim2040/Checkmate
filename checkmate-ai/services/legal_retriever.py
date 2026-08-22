@@ -30,7 +30,7 @@ async def get_sections_from_gpt(llm, contract_type: str, existing_sections_text:
 
     # LCEL 방식으로 프롬프트 체인 실행
     chain = required_sections_prompt | llm
-    result = chain.invoke({
+    result = await chain.ainvoke({
         "contract_type": contract_type,
         "existing_sections": existing_sections_text,
         "category_name": category_name,
