@@ -1,7 +1,7 @@
 import json
 import random
 import re
-import time
+import asyncio
 from datetime import datetime
 
 from langchain.chains import LLMChain
@@ -73,7 +73,7 @@ async def structure_contract_with_gpt(contract_text: str, contract_id: int = Non
                 # 지수 백오프 + 약간의 무작위성
                 backoff_time = (2 ** attempt) + random.uniform(0, 1)
                 logger.warning(f"시도 {attempt}/{MAX_RETRIES} 실패: {e}. {backoff_time:.2f}초 후 재시도...")
-                time.sleep(backoff_time)
+                await asyncio.sleep(backoff_time)
             else:
                 logger.error(f"모든 시도 실패. 최종 오류: {e}")
     # 최대 시도 횟수 초과 시 예외 다시 발생
