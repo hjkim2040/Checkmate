@@ -63,7 +63,8 @@ public class WebClientConfig {
 			.retrieve()
 			.bodyToMono(Void.class)
 			.doOnSuccess(v -> log.info("계약서 분석 요청 성공: contractId={}", contractId))
-			.doOnError(e -> log.error("계약서 분석 요청 실패: contractId={}, error={}", contractId, e.getMessage()));
+			.doOnError(e -> log.error("계약서 분석 요청 실패: contractId={}, error={}", contractId, e.getMessage()))
+			.onErrorComplete();
 	}
 
 	/**
@@ -90,6 +91,7 @@ public class WebClientConfig {
 			.bodyToMono(Void.class)
 			.doOnSuccess(v -> log.info("계약서 질문 생성 요청 성공: contractId={}", contractId))
 			.doOnError(e -> log.error("계약서 질문 생성 요청 실패: contractId={}, error={}",
-				contractId, e.getMessage()));
+				contractId, e.getMessage()))
+			.onErrorComplete();
 	}
 }
