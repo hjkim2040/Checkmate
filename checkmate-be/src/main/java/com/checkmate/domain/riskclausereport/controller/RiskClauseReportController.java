@@ -47,7 +47,7 @@ public class RiskClauseReportController {
 		@Parameter(description = "현재 로그인한 사용자 정보", required = true)
 		@AuthenticationPrincipal CustomUserDetails userDetails) {
 		List<RiskClauseReportResponseDto> data =
-			riskClauseReportService.getImprovementReportsByAnalysisId(aiAnalysisId, userDetails.getUserId());
+			riskClauseReportService.getRiskClauseReportsByAnalysisId(aiAnalysisId, userDetails.getUserId());
 		return ApiResult.ok(data);
 	}
 }

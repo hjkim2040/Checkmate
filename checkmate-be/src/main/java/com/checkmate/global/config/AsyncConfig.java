@@ -6,11 +6,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 @EnableAsync
-public class AsyncConfig implements WebMvcConfigurer {
+public class AsyncConfig {
 
     /**
      * ClamAV 바이러스 검사용 스레드 풀 설정
