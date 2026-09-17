@@ -137,7 +137,7 @@ public class ContractService {
 
         contract.getFiles().forEach(file -> contractFileService.deleteFileByAddress(file.getFileAddress()));
 
-        contractRepository.deleteById(contractId);
+        contractRepository.delete(contract);
     }
 
     /**
