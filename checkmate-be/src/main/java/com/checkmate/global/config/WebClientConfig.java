@@ -62,6 +62,7 @@ public class WebClientConfig {
 			.bodyValue(request)
 			.retrieve()
 			.bodyToMono(Void.class)
+			.retryWhen(reactor.util.retry.Retry.backoff(3, java.time.Duration.ofSeconds(2)))
 			.doOnSuccess(v -> log.info("계약서 분석 요청 성공: contractId={}", contractId))
 			.doOnError(e -> log.error("계약서 분석 요청 실패: contractId={}, error={}", contractId, e.getMessage()))
 			.onErrorComplete();
@@ -89,6 +90,7 @@ public class WebClientConfig {
 			.bodyValue(request)
 			.retrieve()
 			.bodyToMono(Void.class)
+			.retryWhen(reactor.util.retry.Retry.backoff(3, java.time.Duration.ofSeconds(2)))
 			.doOnSuccess(v -> log.info("계약서 질문 생성 요청 성공: contractId={}", contractId))
 			.doOnError(e -> log.error("계약서 질문 생성 요청 실패: contractId={}, error={}",
 				contractId, e.getMessage()))
