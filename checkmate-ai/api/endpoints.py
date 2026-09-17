@@ -190,6 +190,19 @@ async def process_contract_background(
 
     except Exception as e:
         logger.error(f"백그라운드 처리 오류: {e}", exc_info=True)
+        last_error = None
+        for attempt in range(3):
+            try:
+                await process_contract_pipeline(...)
+                await send_webhook_notification(..., status="completed", result_type="ANALYSIS")
+                return
+            except Exception as e:
+                last_error = e
+                logger.error(f"[{req.contract_id}] 파이프라인 실패 (attempt {attempt + 1}/3): {e}", exc_info=True)
+                if attempt < 2:
+                    await asyncio.sleep(5 * (2 ** attempt))
+
+        logger.error(f"[{req.contract_id}] 재시도 모두 실패: {last_error}")
         await cleanup_incomplete_data(req.contract_id, mongo, mysql)
         # 실패 알림도 전송
         await send_webhook_notification(
@@ -250,7 +263,7 @@ async def process_contract_pipeline(
                 ai_analysis_report_id = await mongo.save_ai_analysis_report(cid)
             else:
                 report = await mongo.db.ai_analysis_report.find_one({"contractId": cid})
-                ai_analysis_report_id = str(report["_id"])
+                ai_analysis_report_id = report["_id"]
 
             tasks = []
 

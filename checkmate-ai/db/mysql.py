@@ -81,6 +81,9 @@ class MySQLManager:
                             clause_type.value,
                             datetime.now()
                         ))
+                    await cur.execute(
+                        "DELETE FROM clause WHERE contract_id = %s", (contract_id,)
+                    )
                     sql = """
                           INSERT INTO clause
                           (contract_id, clause_number, clause_title, clause_content, clause_type, created_at)
@@ -118,6 +121,9 @@ class MySQLManager:
 
                     if values:
                         # 배치 INSERT 실행
+                        await cur.execute(
+                            "DELETE FROM question WHERE contract_id = %s", (contract_id,)
+                        )
                         sql = """
                               INSERT INTO question
                                   (contract_id, contract_category_id, question_detail, created_at)

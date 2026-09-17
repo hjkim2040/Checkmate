@@ -142,6 +142,12 @@ class MongoDBManager:
         result = await self.collections.get("risk_clause_report").insert_one(risk_clause_report)
         return result.inserted_id
 
+    async def delete_reports_by_analysis_id(self, ai_analysis_report_id: ObjectId, collection_key: str) -> int:
+        """특정 분석 리포트에 속한 하위 리포트 전체 삭제 (재분석 시 멱등성 확보용)"""
+        result = await self.collections.get(collection_key).delete_many(
+            {"aiAnalysisReportId": ai_analysis_report_id}
+        )
+        return result.deleted_count
 
 # MongoDB 클라이언트 인스턴스 생성
 mongo_manager = MongoDBManager()

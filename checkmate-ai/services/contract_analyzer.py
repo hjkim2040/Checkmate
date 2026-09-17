@@ -4,6 +4,7 @@ import re
 from typing import Dict, Any, List, Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from openai import APIConnectionError, APITimeoutError, RateLimitError, InternalServerError
 
 from models.schemas import StructuredContract
 from nlp.prompts import (
@@ -28,7 +29,9 @@ logger = setup_logger(__name__)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(EmptyResponseError),
+    retry=retry_if_exception_type(
+        (EmptyResponseError, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError)
+    ),
     reraise=True
 )
 async def analyze_with_retry(llm, prompt_template, input_data: dict) -> dict:
@@ -183,6 +186,23 @@ async def save_analysis_results(
         mysql_manager
 ):
     """분석 결과를 DB에 저장"""
+
+    # 성공한 유형만 기존 결과를 비우고 다시 쓴다.
+    # 실패한 유형은 건드리지 않아 이전 성공분이 보존된다.
+    collection_by_task = {
+        "missing": "missing_clause_report",
+        "improvements": "improvement_report",
+        "risks": "risk_clause_report",
+    }
+    for task_name, collection_key in collection_by_task.items():
+        if task_name not in results:
+            continue
+        deleted = await mongo_manager.delete_reports_by_analysis_id(
+            ai_analysis_report_id, collection_key
+        )
+        if deleted:
+            logger.info(f"[{contract_id}] {collection_key} 기존 {deleted}건 삭제 후 재저장")
+
 
     save_tasks = []
 
