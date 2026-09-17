@@ -1,10 +1,8 @@
 import asyncio
 import json
 import re
-import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-from langchain.chains import LLMChain
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from models.schemas import StructuredContract
@@ -16,6 +14,8 @@ from nlp.prompts import (
 )
 from utils.logging import setup_logger
 
+# LLM 입력 토큰 제한을 위한 계약서 본문 최대 길이
+CONTENT_CHAR_LIMIT = 15000
 
 # 빈 응답 예외 클래스
 class EmptyResponseError(Exception):
@@ -79,8 +79,6 @@ async def analyze_contract_parallel(
 
     logger.info(f"계약서 분석 시작: {structured_contract.contract_id}")
 
-    analysis_tasks = []
-
     # 3. 법률 컨텍스트 포매팅
     legal_context = format_clause_laws(clause_specific_laws)
 
@@ -88,53 +86,41 @@ async def analyze_contract_parallel(
     required_sections_text = "\n".join([f"- {section}" for section in required_sections])
 
     # 계약서 전체 내용
-    content = "\n\n".join([f"{section.number} {section.title}\n{section.content}"
-                           for section in structured_contract.sections])
+    content = build_contract_content(structured_contract)
 
     # 공통 입력 데이터
     common_data = {
         "title": structured_contract.metadata.title,
         "contract_type": contract_type,
         "category_name": category_name,
-        "content": content[:15000],  # 토큰 제한을 위해 길이 제한
+        "content": content,  # 토큰 제한을 위해 길이 제한
         "legal_context": legal_context
     }
 
-    # 1. 누락 조항 분석 (전체 필수 조항 정보 필요)
-    missing_input = {
-        **common_data,
-        "required_sections": required_sections_text
-    }
-    analysis_tasks.append(("missing", analyze_with_retry(llm, missing_sections_prompt, missing_input)))
+    analysis_tasks = [
+        # 1. 누락 조항 분석 (전체 필수 조항 정보 필요)
+        ("missing", analyze_with_retry(llm, missing_sections_prompt, {
+            **common_data,
+            "required_sections": required_sections_text
+        })),
 
-    # 2. 개선사항 분석
-    improvements_input = common_data.copy()
-    analysis_tasks.append(("improvements", analyze_with_retry(llm, improvements_prompt, improvements_input)))
+        # 2. 개선사항 분석
+        ("improvements", analyze_with_retry(llm, improvements_prompt, common_data)),
 
-    # 3. 위험 조항 분석
-    risks_input = common_data.copy()
-    analysis_tasks.append(("risks", analyze_with_retry(llm, risk_analysis_prompt, risks_input)))
+        # 3. 위험 조항 분석
+        ("risks", analyze_with_retry(llm, risk_analysis_prompt, common_data)),
 
-    # 4. 질문 생성
-    questions_input = {
-        "title": structured_contract.metadata.title,
-        "contract_type": contract_type,
-        "category_name": category_name,
-        "content": content[:15000]
-    }
-    analysis_tasks.append(("questions", analyze_with_retry(llm, questions_generation_prompt, questions_input)))
+        # 4. 질문 생성
+        ("questions", generate_questions(llm, structured_contract, category_name, content, contract_type))
+    ]
 
-    # 병렬 실행
-    results = {}
     try:
-        # 각 태스크의 시작 시간 기록
-        task_starts = {}
-        for name, task in analysis_tasks:
-            task_starts[name] = time.time()
         responses = await asyncio.gather(*[task for _, task in analysis_tasks])
         # 결과 매핑
-        for (name, _), response in zip(analysis_tasks, responses):
-            results[name] = response
+        results = {
+            name: response
+            for (name, _), response in zip(analysis_tasks, responses)
+        }
 
         # 각 분석 결과 저장
         await save_analysis_results(
@@ -146,7 +132,7 @@ async def analyze_contract_parallel(
             mysql_manager
         )
 
-        logger.info(f"계약서 병렬 분석 완료: {structured_contract.contract_id}")
+        logger.info(f"계약서 분석 완료: {structured_contract.contract_id}")
 
         return {
             "ai_analysis_report_id": str(ai_analysis_report_id),
@@ -203,35 +189,32 @@ async def save_analysis_results(
     # 1. 누락 조항 저장
     missing_sections = results.get("missing", {}).get("missing_sections", [])
     for item in missing_sections:
-        task = mongo_manager.save_missing_clause_report(
+        save_tasks.append(mongo_manager.save_missing_clause_report(
             ai_analysis_report_id,
             item.get("severity", "중간"),
             item.get("description", "")
-        )
-        save_tasks.append(task)
+        ))
 
     # 2. 개선 사항 저장
     improvements = results.get("improvements", {}).get("improvement_recommendations", [])
     for item in improvements:
-        task = mongo_manager.save_improvement_report(
+        save_tasks.append(mongo_manager.save_improvement_report(
             ai_analysis_report_id,
             item.get("description", "")
-        )
-        save_tasks.append(task)
+        ))
 
     # 3. 위험 영역 저장
     risk_clauses = results.get("risks", {}).get("risk_clauses", [])
     for item in risk_clauses:
-        task = mongo_manager.save_risk_clause_report(
+        save_tasks.append(mongo_manager.save_risk_clause_report(
             ai_analysis_report_id,
             item.get("severity", "중간"),
             item.get("original_text", ""),
             item.get("description", "")
-        )
-        save_tasks.append(task)
+        ))
 
     # 4. 질문 저장
-    questions_data = results.get("questions", {}).get("questions", [])
+    questions_data = results.get("questions") or []
 
     if save_tasks:
         try:
@@ -241,12 +224,12 @@ async def save_analysis_results(
                 batch = save_tasks[i:i + batch_size]
 
                 # 병렬 실행
-                results = await asyncio.gather(*batch, return_exceptions=True)
+                batch_results = await asyncio.gather(*batch, return_exceptions=True)
 
                 # 에러 확인
-                for idx, result in enumerate(results):
+                for idx, result in enumerate(batch_results):
                     if isinstance(result, Exception):
-                        logger.error(f"DB 저장 작업 {i + idx} 실패: {result}")
+                        logger.error(f"DB 저장 작업 {i + idx} 실패: {results}")
         except Exception as e:
             logger.error(f"MongoDB 저장 중 오류 발생: {e}")
 
@@ -262,3 +245,63 @@ async def save_analysis_results(
             logger.error(f"질문 배치 저장 실패: {e}")
 
     logger.info(f"분석 결과 저장 완료")
+
+def build_contract_content(
+        structured_contract: StructuredContract,
+        limit: int = CONTENT_CHAR_LIMIT
+) -> str:
+    """구조화된 계약서를 LLM 입력용 단일 텍스트로 변환
+
+    조항 조합 + 길이 제한 로직이 분석 파이프라인과 질문 생성 파이프라인
+    양쪽에서 쓰이므로 여기 한 곳에서만 관리한다.
+    """
+    content = "\n\n".join(
+        f"{section.number} {section.title}\n{section.content}"
+        for section in structured_contract.sections
+    )
+    return content[:limit]
+
+async def generate_questions(
+        llm,
+        structured_contract: StructuredContract,
+        category_name: str,
+        content: Optional[str] = None,
+        contract_type: Optional[str] = None
+) -> List[Any]:
+    """계약서 기반 질문 생성 (LLM 호출까지만 수행)
+
+    :param content: 이미 만들어 둔 본문이 있으면 재사용 (중복 조합 방지)
+    :param contract_type: 별도로 판별한 계약 유형이 있으면 우선 사용
+    """
+    if content is None:
+        content = build_contract_content(structured_contract)
+
+    questions_input = {
+        "title": structured_contract.metadata.title,
+        "contract_type": contract_type or structured_contract.metadata.contract_type,
+        "category_name": category_name,
+        "content": content,
+    }
+
+    response = await analyze_with_retry(llm, questions_generation_prompt, questions_input)
+    return response.get("questions", [])
+
+async def generate_and_save_questions(
+        llm,
+        structured_contract: StructuredContract,
+        contract_category_id: int,
+        mysql_manager,
+        category_name: str,
+        content: Optional[str] = None,
+        contract_type: Optional[str] = None
+) -> List[Any]:
+    """질문 생성 후 MySQL 저장까지 수행 (질문 생성 전용 파이프라인용)"""
+    cid = structured_contract.contract_id
+
+    questions = await generate_questions(llm, structured_contract, category_name, content, contract_type)
+
+    if questions:
+        await mysql_manager.save_questions_batch(cid, contract_category_id, questions)
+
+    logger.info(f"[{cid}] 질문 생성 완료: {len(questions)}개 생성됨")
+    return questions

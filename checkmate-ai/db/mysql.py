@@ -63,21 +63,6 @@ class MySQLManager:
 
         return await self.with_retry(operation, contract_id, file_category)
 
-    async def save_question(self, contract_id: int, contract_category_id: int, question_detail: str) -> int:
-        """질문 저장"""
-        async def operation(pool, cid, cat_id, detail):
-            async with self.pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    sql = """
-                          INSERT INTO question
-                              (contract_id, contract_category_id, question_detail, created_at)
-                          VALUES (%s, %s, %s, %s) \
-                          """
-                    await cur.execute(sql, (contract_id, contract_category_id, question_detail, datetime.now()))
-                    return cur.lastrowid
-
-        return await self.with_retry(operation, contract_id, contract_category_id, question_detail)
-
     async def save_contract_clauses(self, contract_id: int, sections: list):
         """계약서 조항들을 저장"""
         async def operation(pool, cid, secs):

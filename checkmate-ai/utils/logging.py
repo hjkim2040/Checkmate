@@ -22,8 +22,6 @@ def setup_logger(name: str) -> logging.Logger:
     Returns:
         logging.Logger: 설정된 로거 객체
     """
-    global _LOGGERS
-
     if name in _LOGGERS:
         return _LOGGERS[name]
 

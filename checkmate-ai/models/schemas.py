@@ -3,11 +3,6 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 
 
-# 분석 설정 모델
-class AnalysisConfig(BaseModel):
-    temperature: float = Field(default=0.0, description="모델 temperature")
-
-
 class OcrRequest(BaseModel):
     contract_id: int
     contract_category_id: Optional[int] = 1

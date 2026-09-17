@@ -11,7 +11,7 @@ from db.redis import OCRCache
 from models.schemas import OcrRequest, QuestionGenerationRequest
 from nlp.llm import init_llm_model
 from nlp.prompts import questions_generation_prompt
-from services.contract_analyzer import analyze_contract_parallel, analyze_with_retry
+from services.contract_analyzer import analyze_contract_parallel, generate_and_save_questions
 from services.contract_parser import structure_contract_with_gpt
 from services.decryption import DecryptionService
 from services.legal_retriever import get_contract_type_requirements, get_clause_specific_laws_parallel
@@ -228,23 +228,13 @@ async def process_contract_pipeline(
             logger.info(f"[{cid}] 질문 생성만 수행")
             structured_contract = await structure_contract_with_gpt(all_text, cid, cname, llm)
 
-            # 계약서 전체 내용
-            content = "\n\n".join([f"{section.number} {section.title}\n{section.content}"
-                                   for section in structured_contract.sections])
-
-            questions_input = {
-                "title": structured_contract.metadata.title,
-                "contract_type": structured_contract.metadata.contract_type,
-                "category_name": cname,
-                "content": content[:15000]
-            }
-
-            response = await analyze_with_retry(llm, questions_generation_prompt, questions_input)
-            questions = response.get("questions", [])
-            # MySQL에 질문 저장
-            await mysql.save_questions_batch(cid, req.contract_category_id, questions)
-
-            logger.info(f"[{cid}] 질문 생성 완료: {len(questions)}개 생성됨")
+            questions = await generate_and_save_questions(
+                llm,
+                structured_contract,
+                req.contract_category_id,
+                mysql,
+                cname,
+            )
 
             return {
                 "success": True,

@@ -4,8 +4,6 @@ import re
 import asyncio
 from datetime import datetime
 
-from langchain.chains import LLMChain
-
 from models.schemas import StructuredContract
 from nlp.llm import init_llm_model
 from nlp.prompts import contract_structuring_chat_prompt
@@ -25,7 +23,7 @@ async def structure_contract_with_gpt(contract_text: str, contract_id: int = Non
     if contract_id is None:
         contract_id = int(datetime.now().timestamp())
 
-    logger.info(f"계약서 구조화 시작")
+    logger.info(f"[{contract_id}] 계약서 구조화 시작")
 
     # 재시도 설정
     MAX_RETRIES = 3
@@ -42,7 +40,7 @@ async def structure_contract_with_gpt(contract_text: str, contract_id: int = Non
             result = await process_single_chunk(llm, contract_text, category_name)
 
             # 응답 검증
-            validate_structure_response(result, category_name)
+            validate_structure_response(result)
 
             # 구조화된 계약서 객체 생성
             contract_data = {
@@ -63,7 +61,7 @@ async def structure_contract_with_gpt(contract_text: str, contract_id: int = Non
                     for section in result.get("sections", [])
                 ]
             }
-            logger.info(f"계약서 구조화 완료")
+            logger.info(f"[{contract_id}] 계약서 구조화 완료")
             return StructuredContract(**contract_data)
 
 
