@@ -44,6 +44,7 @@ MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD")
 REDIS_HOST = os.environ.get("REDIS_HOST")
 REDIS_PORT = os.environ.get("REDIS_PORT")
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
+OCR_CACHE_TTL = int(os.environ.get("OCR_CACHE_TTL", 3600))
 
 # AWS S3
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")

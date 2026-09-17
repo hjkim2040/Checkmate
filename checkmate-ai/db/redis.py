@@ -3,7 +3,7 @@ from typing import Optional
 
 import redis.asyncio as redis
 
-from config.settings import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
+from config.settings import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, OCR_CACHE_TTL
 
 
 class OCRCache:
@@ -33,7 +33,7 @@ class OCRCache:
             return json.loads(data)
         return None
 
-    async def set(self, contract_id: int, ocr_result: dict, expire: int = 3600):
+    async def set(self, contract_id: int, ocr_result: dict, expire: int = OCR_CACHE_TTL):
         """캐시에 OCR 결과 저장"""
         if not self.redis:
             await self.connect()

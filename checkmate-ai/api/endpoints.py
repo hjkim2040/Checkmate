@@ -406,8 +406,11 @@ async def get_ocr_result(cid, decryption_service, ocr_engine, ocr_cache):
     ocr_result = await ocr_engine.recognize(pdf_bytes)
     pages = postprocessing_pipeline(ocr_result, cid)
 
-    # 캐시 저장을 비동기로 처리
-    asyncio.create_task(ocr_cache.set(cid, pages))
+    # 캐시 저장 (실패해도 파이프라인은 계속 진행)
+    try:
+        await ocr_cache.set(cid, pages)
+    except Exception as e:
+        logger.warning(f"[{cid}] OCR 캐시 저장 실패, 계속 진행합니다: {e}")
 
     return pages
 
