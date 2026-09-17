@@ -5,6 +5,7 @@ import com.checkmate.domain.contract.entity.EditStatus;
 import com.checkmate.domain.contract.entity.SignatureStatus;
 import com.checkmate.domain.contractcategory.entity.ContractCategory;
 import com.checkmate.domain.user.entity.User;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -17,6 +18,7 @@ public interface ContractRepository extends JpaRepository<Contract, Integer> {
      * @param user 사용자 엔티티
      * @return 해당 사용자의 모든 계약서 목록
      */
+    @EntityGraph(attributePaths = "category")
     List<Contract> findAllByUser(User user);
 
     /**
