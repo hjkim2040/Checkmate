@@ -338,7 +338,7 @@ async def process_contract_pipeline(
         raise
 
 
-async def execute_parallel_tasks(tasks):
+async def execute_parallel_tasks(tasks, optional: set[str] = frozenset()):
     """병렬 태스크 실행 헬퍼 함수"""
     results = {}
 
@@ -360,6 +360,10 @@ async def execute_parallel_tasks(tasks):
         # 결과 매핑
         for name, result in zip(task_names, task_results):
             if isinstance(result, Exception):
+                if name in optional:
+                    logger.warning(f"선택 태스크 {name} 실패, 없이 진행합니다: {result}")
+                    results[name] = None
+                    continue
                 logger.error(f"Task {name} failed: {result}")
                 raise result
             results[name] = result
