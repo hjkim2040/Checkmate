@@ -279,7 +279,7 @@ async def get_clause_specific_laws_parallel(structured_contract, vector_store) -
     # 2. 배치로 임베딩 생성 (한 번의 API 호출로 모든 임베딩 생성)
     try:
         # embed_documents를 사용하여 배치 처리
-        embeddings = vector_store.embeddings.embed_documents(queries)
+        embeddings = await asyncio.to_thread(vector_store.embeddings.embed_documents, queries)
         logger.info(f"임베딩 생성 완료: {len(embeddings)}개")
     except Exception as e:
         logger.error(f"배치 임베딩 생성 오류: {e}")
