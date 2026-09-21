@@ -1,5 +1,6 @@
 import asyncio
 from typing import Union
+from collections.abc import Collection
 
 from db.mongo import MongoDBManager
 from db.mysql import MySQLManager
@@ -144,18 +145,20 @@ async def process_contract_pipeline(
             # 8. 구조화 완료 후 병렬 처리할 태스크들
             second_round_tasks = [
                 ("mysql_save", lambda: mysql.save_contract_clauses(cid, sections_data)),
-                ("summary_save",
-                 lambda: mongo.save_summary_report(ai_analysis_report_id, summary_result) if summary_result else None),
                 ("required_sections", lambda: get_contract_type_requirements(contract_type, cname, llm)),
                 ("clause_laws", lambda: get_clause_specific_laws_parallel(structured_contract, vector_store))
             ]
-            # None이 아닌 작업만 필터링
-            second_round_tasks = [(name, task) for name, task in second_round_tasks if task is not None]
+            if summary_result:
+                second_round_tasks.append(
+                    ("summary_save", lambda: mongo.save_summary_report(ai_analysis_report_id, summary_result)),
+                )
 
-            second_results = await _execute_parallel_tasks(second_round_tasks)
+            second_results = await _execute_parallel_tasks(
+                second_round_tasks,
+                optional={"required_sections", "clause_laws"})
 
-            required_sections = second_results.get("required_sections")
-            clause_specific_laws = second_results.get("clause_laws")
+            required_sections = second_results.get("required_sections") or []
+            clause_specific_laws = second_results.get("clause_laws") or {}
 
             # 10. 최종 분석 (모든 준비가 완료된 후)
             logger.info(f"[{cid}] 최종 분석 시작")
@@ -184,7 +187,7 @@ async def process_contract_pipeline(
         raise
 
 
-async def _execute_parallel_tasks(tasks, optional: set[str] = frozenset()):
+async def _execute_parallel_tasks(tasks, optional: Collection[str] = frozenset()):
     """병렬 태스크 실행 헬퍼 함수"""
     results = {}
 
@@ -202,7 +205,6 @@ async def _execute_parallel_tasks(tasks, optional: set[str] = frozenset()):
         # 모든 작업을 동시에 실행
         task_results = await asyncio.gather(*coroutines, return_exceptions=True)
 
-        # 병렬 처리 종료 시간
         # 결과 매핑
         for name, result in zip(task_names, task_results):
             if isinstance(result, Exception):
