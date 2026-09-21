@@ -111,8 +111,6 @@ async def ocr_endpoint(
         "message": "계약서 분석이 시작되었습니다. 잠시 후 결과를 확인해주세요.",
     }
 
-MAX_PIPELINE_ATTEMPTS = 2
-
 async def process_contract_background(
         job_id: str,
         req: Union[OcrRequest, QuestionGenerationRequest],
@@ -127,56 +125,32 @@ async def process_contract_background(
 ):
     """백그라운드 처리 + 재시도 + 웹훅 통보 (질문 생성 / 분석 공용)"""
     cid = req.contract_id
-    last_error = None
-
-    for attempt in range(1, MAX_PIPELINE_ATTEMPTS + 1):
-        try:
-            # 재시도 시 이전 시도에서 만들어진 리포트·요약을 중복 생성하지 않도록 다시 확인
-            if process_type == "ANALYSIS" and attempt > 1:
-                existing_data = await check_existing_data(cid, mongo)
-
-            await process_contract_pipeline(
-                req,
-                decryption_service,
-                ocr_engine,
-                mysql,
-                ocr_cache,
-                mongo,
-                process_type = process_type,
-                vector_store = vector_store,
-                existing_data = existing_data,
-            )
-        except Exception as e:
-            last_error = e
-            logger.error(
-                f"[{cid}] {process_type} 실패 (attempt {attempt}/{MAX_PIPELINE_ATTEMPTS}): {e}",
-                exc_info=True,
-            )
-            if attempt < MAX_PIPELINE_ATTEMPTS:
-                await asyncio.sleep(5 * (2 ** attempt - 1))
-        else:
-            await send_webhook_notification(
-                job_id=job_id,
-                contract_id=cid,
-                contract_category_id=req.contract_category_id,
-                status="completed",
-                result_type=process_type,
-            )
-            return
-
-        logger.error(f"[{cid}] [{process_type}] 재시도 모두 실패: {last_error}")
+    try:
+        await process_contract_pipeline(
+            req,
+            decryption_service,
+            ocr_engine,
+            mysql,
+            ocr_cache,
+            mongo,
+            process_type = process_type,
+            vector_store = vector_store,
+            existing_data = existing_data,
+        )
+        status = "completed"
+    except Exception as e:
+        logger.error(f"[{cid}] {process_type} 처리 오류: {e}", exc_info=True)
         if process_type == "ANALYSIS":
             await cleanup_incomplete_data(cid, mongo, mysql)
+        status = "failed"
 
-        # Spring Boot에 웹훅 전송
-        await send_webhook_notification(
-            job_id=job_id,
-            contract_id=cid,
-            contract_category_id=req.contract_category_id,
-            status="failed",
-            result_type=process_type,
-        )
-
+    await send_webhook_notification(
+        job_id=job_id,
+        contract_id=cid,
+        contract_category_id=req.contract_category_id,
+        status=status,
+        result_type=process_type,
+    )
 
 async def process_contract_pipeline(
         req: Union[OcrRequest, QuestionGenerationRequest],

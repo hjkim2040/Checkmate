@@ -9,6 +9,7 @@ from config.settings import (
     EMBEDDING_REPO_ID, HUGGINGFACE_API_KEY
 )
 from utils.logging import setup_logger
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = setup_logger(__name__)
 
@@ -21,6 +22,9 @@ class HuggingFaceInferenceEmbeddings(Embeddings):
         self.model = model
         self.batch_size = 10
 
+    @retry(stop=stop_after_attempt(3),
+           wait=wait_exponential(multiplier=1, min=1, max=5),
+           reraise=True)
     def _embed_text_sync(self, text: str) -> List[float]:
         """동기 방식의 임베딩 생성 (API 호출)"""
         try:
