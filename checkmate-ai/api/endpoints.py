@@ -10,7 +10,7 @@ from db.mysql import MySQLManager
 from db.redis import OCRCache
 from models.schemas import OcrRequest, QuestionGenerationRequest
 from nlp.llm import init_llm_model
-from nlp.prompts import questions_generation_prompt
+from services import decryption
 from services.contract_analyzer import analyze_contract_parallel, generate_and_save_questions
 from services.contract_parser import structure_contract_with_gpt
 from services.decryption import DecryptionService
@@ -44,14 +44,15 @@ async def generate_questions_endpoint(
 
     # 백그라운드 작업 추가
     background_tasks.add_task(
-        process_question_generation_background,
-        job_id,
-        req,
-        service,
-        engine,
-        mysql,
-        mongo,
-        ocr_cache
+        process_contract_background,
+        job_id=job_id,
+        req=req,
+        decryption_service=service,
+        ocr_engine=engine,
+        mysql=mysql,
+        mongo=mongo,
+        ocr_cache=ocr_cache,
+        process_type="QUESTION_GENERATION",
     )
 
     # 즉시 응답
@@ -92,15 +93,16 @@ async def ocr_endpoint(
     # 백그라운드 작업 추가
     background_tasks.add_task(
         process_contract_background,
-        job_id,
-        req,
-        service,
-        engine,
-        mysql,
-        mongo,
-        vector_store,
-        existing_data,
-        ocr_cache
+        job_id=job_id,
+        req=req,
+        decryption_service=service,
+        ocr_engine=engine,
+        mysql=mysql,
+        mongo=mongo,
+        vector_store=vector_store,
+        existing_data=existing_data,
+        ocr_cache=ocr_cache,
+        process_type="ANALYSIS",
     )
 
     # 즉시 응답
@@ -109,108 +111,70 @@ async def ocr_endpoint(
         "message": "계약서 분석이 시작되었습니다. 잠시 후 결과를 확인해주세요.",
     }
 
-
-async def process_question_generation_background(
-        job_id: str,
-        req: QuestionGenerationRequest,
-        decryption_service: DecryptionService,
-        ocr_engine: OcrEngine,
-        mysql: MySQLManager,
-        mongo: MongoDBManager,
-        ocr_cache: OCRCache
-):
-    """백그라운드에서 질문 생성만 처리"""
-    try:
-        # 수정된 파이프라인 호출 - 질문 생성 모드로
-        await process_contract_pipeline(
-            req,
-            decryption_service,
-            ocr_engine,
-            mysql,
-            ocr_cache,
-            mongo,
-            process_type="QUESTION_GENERATION"  # 질문 생성 모드
-        )
-
-        # Spring Boot에 웹훅 전송 - 성공
-        await send_webhook_notification(
-            job_id=job_id,
-            contract_id=req.contract_id,
-            contract_category_id=req.contract_category_id,
-            status="completed",
-            result_type="QUESTION_GENERATION"
-        )
-
-    except Exception as e:
-        logger.error(f"질문 생성 처리 오류: {e}", exc_info=True)
-
-        # Spring Boot에 웹훅 전송 - 실패
-        await send_webhook_notification(
-            job_id=job_id,
-            contract_id=req.contract_id,
-            contract_category_id=req.contract_category_id,
-            status="failed",
-            result_type="QUESTION_GENERATION"
-        )
+MAX_PIPELINE_ATTEMPTS = 2
 
 async def process_contract_background(
         job_id: str,
-        req: OcrRequest,
+        req: Union[OcrRequest, QuestionGenerationRequest],
         decryption_service: DecryptionService,
         ocr_engine: OcrEngine,
         mysql: MySQLManager,
         mongo: MongoDBManager,
-        vector_store,
-        existing_data: dict,
-        ocr_cache: OCRCache
+        ocr_cache: OCRCache,
+        process_type: str = "ANALYSIS",
+        vector_store = None,
+        existing_data: dict = None,
 ):
-    """백그라운드에서 계약서 처리"""
-    try:
-        # 기존 process_contract_pipeline 호출
-        await process_contract_pipeline(
-            req,
-            decryption_service,
-            ocr_engine,
-            mysql,
-            ocr_cache,
-            mongo,
-            process_type="ANALYSIS",
-            vector_store = vector_store,
-            existing_data = existing_data,
-        )
+    """백그라운드 처리 + 재시도 + 웹훅 통보 (질문 생성 / 분석 공용)"""
+    cid = req.contract_id
+    last_error = None
+
+    for attempt in range(1, MAX_PIPELINE_ATTEMPTS + 1):
+        try:
+            # 재시도 시 이전 시도에서 만들어진 리포트·요약을 중복 생성하지 않도록 다시 확인
+            if process_type == "ANALYSIS" and attempt > 1:
+                existing_data = await check_existing_data(cid, mongo)
+
+            await process_contract_pipeline(
+                req,
+                decryption_service,
+                ocr_engine,
+                mysql,
+                ocr_cache,
+                mongo,
+                process_type = process_type,
+                vector_store = vector_store,
+                existing_data = existing_data,
+            )
+        except Exception as e:
+            last_error = e
+            logger.error(
+                f"[{cid}] {process_type} 실패 (attempt {attempt}/{MAX_PIPELINE_ATTEMPTS}): {e}",
+                exc_info=True,
+            )
+            if attempt < MAX_PIPELINE_ATTEMPTS:
+                await asyncio.sleep(5 * (2 ** attempt - 1))
+        else:
+            await send_webhook_notification(
+                job_id=job_id,
+                contract_id=cid,
+                contract_category_id=req.contract_category_id,
+                status="completed",
+                result_type=process_type,
+            )
+            return
+
+        logger.error(f"[{cid}] [{process_type}] 재시도 모두 실패: {last_error}")
+        if process_type == "ANALYSIS":
+            await cleanup_incomplete_data(cid, mongo, mysql)
 
         # Spring Boot에 웹훅 전송
         await send_webhook_notification(
             job_id=job_id,
-            contract_id=req.contract_id,
-            contract_category_id=req.contract_category_id,
-            status="completed",
-            result_type="ANALYSIS"
-        )
-
-    except Exception as e:
-        logger.error(f"백그라운드 처리 오류: {e}", exc_info=True)
-        last_error = None
-        for attempt in range(3):
-            try:
-                await process_contract_pipeline(...)
-                await send_webhook_notification(..., status="completed", result_type="ANALYSIS")
-                return
-            except Exception as e:
-                last_error = e
-                logger.error(f"[{req.contract_id}] 파이프라인 실패 (attempt {attempt + 1}/3): {e}", exc_info=True)
-                if attempt < 2:
-                    await asyncio.sleep(5 * (2 ** attempt))
-
-        logger.error(f"[{req.contract_id}] 재시도 모두 실패: {last_error}")
-        await cleanup_incomplete_data(req.contract_id, mongo, mysql)
-        # 실패 알림도 전송
-        await send_webhook_notification(
-            job_id=job_id,
-            contract_id=req.contract_id,
+            contract_id=cid,
             contract_category_id=req.contract_category_id,
             status="failed",
-            result_type="ANALYSIS"
+            result_type=process_type,
         )
 
 
@@ -464,10 +428,9 @@ async def cleanup_incomplete_data(contract_id, mongo, mysql):
             report_id = report["_id"]
 
             # 2. 관련 서브 문서들 삭제
-            await mongo.db.improvement_report.delete_many({"aiAnalysisReportId": report_id})
-            await mongo.db.missing_clause_report.delete_many({"aiAnalysisReportId": report_id})
-            await mongo.db.risk_clause_report.delete_many({"aiAnalysisReportId": report_id})
-            await mongo.db.summary_report.delete_many({"aiAnalysisReportId": report_id})
+            for key in ("improvement_report", "missing_clause_report",
+                        "risk_clause_report", "summary_report"):
+                await mongo.delete_reports_by_analysis_id(report_id, key)
 
             # 3. 메인 리포트 삭제
             await mongo.db.ai_analysis_report.delete_one({"_id": report_id})
