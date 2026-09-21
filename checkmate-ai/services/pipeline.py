@@ -227,7 +227,7 @@ async def _get_ocr_result(cid, decryption_service, ocr_engine, ocr_cache):
     logger.info(f"[{cid}] OCR 시작")
     pdf_bytes = await decryption_service.decrypt(cid)
     ocr_result = await ocr_engine.recognize(pdf_bytes)
-    pages = postprocessing_pipeline(ocr_result, cid)
+    pages = await asyncio.to_thread(postprocessing_pipeline, ocr_result, cid)
 
     # 캐시 저장 (실패해도 파이프라인은 계속 진행)
     try:

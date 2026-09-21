@@ -1,3 +1,4 @@
+import asyncio
 from urllib.parse import urlparse
 
 import boto3
@@ -22,6 +23,12 @@ class DecryptionService:
             region_name=AWS_REGION
         )
 
+    def _download_and_decrypt(self, key: str, dek: bytes, iv: bytes) -> bytes:
+        """S3 다운로드 + AES-GCM 복호화 (동기, 워커 스레드에서 실행)"""
+        resp = self.s3.get_object(Bucket=S3_BUCKET_NAME, Key=key)
+        ciphertext = resp['Body'].read()
+        return AESGCM(dek).decrypt(iv, ciphertext, None)
+
     async def decrypt(self, contract_id: int) -> bytes:
         info = await self.mysql.get_contract_file_info(contract_id)
         if not info:
@@ -43,11 +50,5 @@ class DecryptionService:
         parsed = urlparse(pdf_url)
         key = parsed.path.lstrip("/")
 
-        # S3에서 암호문 다운로드
-        resp = self.s3.get_object(Bucket=S3_BUCKET_NAME, Key=key)
-        ciphertext = resp['Body'].read()
-
-        # AES-GCM 복호화
-        aesgcm = AESGCM(dek)
-        plaintext = aesgcm.decrypt(iv, ciphertext, None)
-        return plaintext
+        # S3 다운로드와 복호화는 블로킹 작업이라 워커 스레드로 넘긴다
+        return await asyncio.to_thread(self._download_and_decrypt, key, dek, iv)
