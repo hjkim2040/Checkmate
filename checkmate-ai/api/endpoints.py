@@ -10,7 +10,6 @@ from db.mysql import MySQLManager
 from db.redis import OCRCache
 from models.schemas import OcrRequest, QuestionGenerationRequest
 from nlp.llm import init_llm_model
-from services import decryption
 from services.contract_analyzer import analyze_contract_parallel, generate_and_save_questions
 from services.contract_parser import structure_contract_with_gpt
 from services.decryption import DecryptionService
@@ -18,7 +17,8 @@ from services.legal_retriever import get_contract_type_requirements, get_clause_
 from services.ocr_engine import OcrEngine
 from services.postprocessing import postprocessing_pipeline
 from services.summarization import generate_summary
-from utils.dependencies import get_mongo, get_mysql, get_ocr_cache, get_vector_store
+from utils.dependencies import (get_mongo, get_mysql, get_ocr_cache, get_vector_store,
+                                get_decryption_service, get_ocr_engine,)
 from utils.logging import setup_logger
 from config.settings import WEBHOOK_API_KEY, SPRINGBOOT_WEBHOOK_URL
 
@@ -33,11 +33,10 @@ async def generate_questions_endpoint(
         mysql: MySQLManager = Depends(get_mysql),
         mongo: MongoDBManager = Depends(get_mongo),
         ocr_cache: OCRCache = Depends(get_ocr_cache),
+        decryption_service: DecryptionService = Depends(get_decryption_service),
+        ocr_engine: OcrEngine = Depends(get_ocr_engine),
 ):
     """계약서 질문 생성 전용 엔드포인트"""
-
-    service = DecryptionService(mysql, mongo)
-    engine = OcrEngine()
 
     # 작업 ID 생성
     job_id = str(uuid4())
@@ -47,8 +46,8 @@ async def generate_questions_endpoint(
         process_contract_background,
         job_id=job_id,
         req=req,
-        decryption_service=service,
-        ocr_engine=engine,
+        decryption_service=decryption_service,
+        ocr_engine=ocr_engine,
         mysql=mysql,
         mongo=mongo,
         ocr_cache=ocr_cache,
@@ -70,11 +69,10 @@ async def ocr_endpoint(
         mongo: MongoDBManager = Depends(get_mongo),
         vector_store=Depends(get_vector_store),
         ocr_cache: OCRCache = Depends(get_ocr_cache),
+        decryption_service: DecryptionService = Depends(get_decryption_service),
+        ocr_engine: OcrEngine = Depends(get_ocr_engine),
 ):
     """OCR → 요약 → 분석 통합 엔드포인트"""
-
-    service = DecryptionService(mysql, mongo)
-    engine = OcrEngine()
 
     # 기존 데이터 확인
     existing_data = await check_existing_data(req.contract_id, mongo)
@@ -95,8 +93,8 @@ async def ocr_endpoint(
         process_contract_background,
         job_id=job_id,
         req=req,
-        decryption_service=service,
-        ocr_engine=engine,
+        decryption_service=decryption_service,
+        ocr_engine=ocr_engine,
         mysql=mysql,
         mongo=mongo,
         vector_store=vector_store,
