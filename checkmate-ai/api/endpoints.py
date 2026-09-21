@@ -198,7 +198,7 @@ async def process_contract_pipeline(
             if not existing_data['analysis']:
                 ai_analysis_report_id = await mongo.save_ai_analysis_report(cid)
             else:
-                report = await mongo.db.ai_analysis_report.find_one({"contractId": cid})
+                report = await mongo.find_report_by_contract_id(cid)
                 ai_analysis_report_id = report["_id"]
 
             tasks = []
@@ -316,16 +316,10 @@ async def check_existing_data(contract_id: int, mongo: MongoDBManager) -> dict:
 
     # 분석 및 요약 확인
     try:
-        report = await mongo.db.ai_analysis_report.find_one({"contractId": contract_id})
-        logger.info(f"[{contract_id}] : {report}")
+        report = await mongo.find_report_by_contract_id(contract_id)
         if report:
             result['analysis'] = True
-
-            summary_doc = await mongo.db.summary_report.find_one(
-                {"aiAnalysisReportId": report["_id"]}
-            )
-            logger.info(f"[{contract_id}] : {summary_doc}")
-            result['summary'] = summary_doc is not None
+            result['summary'] = await mongo.has_summary_report(report["_id"])
     except Exception as e:
         logger.error(f"분석/요약 확인 오류: {e}")
 
@@ -395,7 +389,7 @@ async def send_webhook_notification(
 async def cleanup_incomplete_data(contract_id, mongo, mysql):
     try:
         # 1. MongoDB에서 ai_analysis_report 찾기
-        report = await mongo.db.ai_analysis_report.find_one({"contractId": contract_id})
+        report = await mongo.find_report_by_contract_id(contract_id)
         if report:
             report_id = report["_id"]
 
@@ -405,16 +399,10 @@ async def cleanup_incomplete_data(contract_id, mongo, mysql):
                 await mongo.delete_reports_by_analysis_id(report_id, key)
 
             # 3. 메인 리포트 삭제
-            await mongo.db.ai_analysis_report.delete_one({"_id": report_id})
+            await mongo.delete_ai_analysis_report(report_id)
 
-        # 4. MySQL 관련 데이터 정리
-        async with mysql.pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                # 예: 질문 삭제
-                await cur.execute("DELETE FROM question WHERE contract_id = %s", (contract_id,))
-                # 예: clause 삭제
-                await cur.execute("DELETE FROM clause WHERE contract_id = %s", (contract_id,))
-
+        await mysql.delete_contract_data(contract_id)
+        
         logger.info(f"계약서 ID {contract_id}의 불완전한 분석 데이터 정리 완료")
     except Exception as cleanup_error:
         logger.error(f"데이터 정리 중 오류 발생: {cleanup_error}", exc_info=True)

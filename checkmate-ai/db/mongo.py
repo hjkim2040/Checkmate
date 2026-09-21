@@ -142,6 +142,21 @@ class MongoDBManager:
         result = await self.collections.get("risk_clause_report").insert_one(risk_clause_report)
         return result.inserted_id
 
+    async def find_report_by_contract_id(self, contract_id: int):
+        """계약서 ID로 AI 분석 리포트 조회"""
+        return await self.collections.get("ai_analysis_report").find_one({"contractId": contract_id})
+
+    async def has_summary_report(self, ai_analysis_report_id: ObjectId) -> bool:
+        """요약 리포트 존재 여부"""
+        doc = await self.collections.get("summary_report").find_one(
+            {"aiAnalysisReportId": ai_analysis_report_id}
+        )
+        return doc is not None
+
+    async def delete_ai_analysis_report(self, ai_analysis_report_id: ObjectId) -> None:
+        """AI 분석 리포트 본 문서 삭제"""
+        await self.collections.get("ai_analysis_report").delete_one({"_id": ai_analysis_report_id})
+
     async def delete_reports_by_analysis_id(self, ai_analysis_report_id: ObjectId, collection_key: str) -> int:
         """특정 분석 리포트에 속한 하위 리포트 전체 삭제 (재분석 시 멱등성 확보용)"""
         result = await self.collections.get(collection_key).delete_many(

@@ -136,6 +136,17 @@ class MySQLManager:
                     return 0
 
         return await self.with_retry(operation, contract_id, contract_category_id, questions)
+
+    async def delete_contract_data(self, contract_id: int) -> None:
+        """계약서에 속한 질문·조항 삭제 (분석 실패 시 정리용)"""
+        async def operation(pool, cid):
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("DELETE FROM question WHERE contract_id = %s", (cid,))
+                    await cur.execute("DELETE FROM clause WHERE contract_id = %s", (cid,))
+
+            return await self.with_retry(operation, contract_id)
+
     def _convert_to_clause_type(self, type_str: str) -> ClauseType:
         """문자열을 ClauseType Enum으로 변환"""
         type_mapping = {
