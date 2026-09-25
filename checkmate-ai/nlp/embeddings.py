@@ -1,8 +1,8 @@
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 from typing import Tuple, Any, List
 
 import numpy as np
-from huggingface_hub import InferenceClient
+from huggingface_hub import AsyncInferenceClient
 from langchain.embeddings.base import Embeddings
 
 from config.settings import (
@@ -15,90 +15,57 @@ logger = setup_logger(__name__)
 
 
 class HuggingFaceInferenceEmbeddings(Embeddings):
-    """SentenceTransformer를 랩핑한 LangChain 호환 임베딩 클래스"""
 
-    def __init__(self, client: InferenceClient, model: str):
-        self.client = client
+    def __init__(self, async_client, model: str, max_concurrency=10):
+        self.async_client = async_client
         self.model = model
-        self.batch_size = 10
+        self._semaphore = asyncio.Semaphore(max_concurrency)
 
-    @retry(stop=stop_after_attempt(3),
-           wait=wait_exponential(multiplier=1, min=1, max=5),
-           reraise=True)
-    def _embed_text_sync(self, text: str) -> List[float]:
-        """동기 방식의 임베딩 생성 (API 호출)"""
-        try:
-            result = self.client.feature_extraction(
-                text=text,
-                model=self.model,
-            )
+    @staticmethod
+    def _to_vector(result) -> List[float]:
+        if isinstance(result, np.ndarray):
+            return result.mean(axis=0).tolist() if result.ndim > 1 else result.tolist()
+        return result[0] if isinstance(result[0], list) else result
 
-            # numpy array 처리
-            if isinstance(result, np.ndarray):
-                if result.ndim > 1:
-                    return result.mean(axis=0).tolist()
-                else:
-                    return result.tolist()
-            elif isinstance(result[0], list):
-                return result[0]
-            else:
-                return result
-        except Exception as e:
-            logger.error(f"임베딩 생성 오류 for text: {text[:50]}... - {e}")
-            raise e
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5), reraise=True)
+    async def _embed_text_async(self, text: str) -> List[float]:
+        async with self._semaphore:
+            result = await self.async_client.feature_extraction(text=text, model=self.model)
+        return self._to_vector(result)
+
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        return list(await asyncio.gather(*(self._embed_text_async(t) for t in texts)))
+
+    async def aembed_query(self, text: str) -> List[float]:
+        return await self._embed_text_async(text)
+
+    async def aclose(self):
+        await self.async_client.close()
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """문서 리스트에 대한 임베딩 생성 (배치 처리)"""
-        logger.info(f"총 {len(texts)}개 텍스트에 대한 배치 임베딩 생성 시작")
-
-        # ThreadPoolExecutor를 사용한 병렬 처리
-        embeddings = []
-
-        with ThreadPoolExecutor(max_workers=self.batch_size) as executor:
-            # 모든 텍스트에 대해 병렬로 임베딩 생성
-            futures = [executor.submit(self._embed_text_sync, text) for text in texts]
-
-            # 순서대로 결과 수집
-            for i, future in enumerate(futures):
-                try:
-                    embedding = future.result()
-                    embeddings.append(embedding)
-
-                    # 진행 상황 로깅 (10개마다)
-                    if (i + 1) % 10 == 0:
-                        logger.info(f"진행률: {i + 1}/{len(texts)} ({(i + 1) * 100 / len(texts):.1f}%)")
-                except Exception as e:
-                    logger.error(f"텍스트 {i} 임베딩 생성 실패: {e}")
-                    raise e
-
-        logger.info(f"총 {len(embeddings)}개 임베딩 생성 완료")
-        return embeddings
+        raise NotImplementedError("비동기 aembed_documents를 사용하세요")
 
     def embed_query(self, text: str) -> List[float]:
-        """단일 쿼리에 대한 임베딩 생성"""
-        # 동기 방식으로 직접 처리
-        return self._embed_text_sync(text)
+        raise NotImplementedError("비동기 aembed_query를 사용하세요")
 
-def init_embedding_model() -> Tuple[Any, int]:
+async def init_embedding_model() -> Tuple[Any, int]:
     """임베딩 모델 초기화"""
 
     try:
         api_key = HUGGINGFACE_API_KEY
-        client = InferenceClient(
+        async_client = AsyncInferenceClient(
             provider="hf-inference",
-            api_key=api_key,  # provider 대신 token 사용
+            api_key=api_key,
         )
-
         model_name = EMBEDDING_REPO_ID
 
 
         # LangChain 호환 래퍼로 감싸기
-        embeddings = HuggingFaceInferenceEmbeddings(client, model_name)
+        embeddings = HuggingFaceInferenceEmbeddings(async_client, model_name)
 
         # 테스트 임베딩 생성
         test_text = "차원 확인용 텍스트"
-        test_embedding = embeddings.embed_query(test_text)
-        embedding_dim = len(test_embedding)
+        embedding_dim = len(await embeddings.aembed_query(test_text))
         logger.info(f"hf 임베딩 모델 로드 성공 (차원: {embedding_dim})")
 
         return embeddings, embedding_dim

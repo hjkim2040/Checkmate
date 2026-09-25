@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 from typing import List, Dict
@@ -261,72 +260,41 @@ async def get_contract_type_requirements(contract_type: str, category_name:str, 
 
 
 async def get_clause_specific_laws_parallel(structured_contract, vector_store) -> Dict[str, Dict]:
-    """모든 조항에 대한 법률 검색 (배치 임베딩 처리로 최적화)"""
+    """모든 조항에 대한 법률 검색 (임베딩 병렬 생성 + 배치 벡터 검색)"""
 
     contract_type = structured_contract.metadata.contract_type
 
     # 1. 모든 쿼리를 먼저 수집
-    queries = []
-    sections = []
-
-    for section in structured_contract.sections:
-        query = f"{contract_type} {section.title} 법적 요건"
-        queries.append(query)
-        sections.append(section)
+    sections = list(structured_contract.sections)
+    queries = [f"{contract_type} {section.title} 법적 요건" for section in sections]
 
     logger.info(f"총 {len(queries)}개 조항에 대한 임베딩 생성 시작")
 
-    # 2. 배치로 임베딩 생성 (한 번의 API 호출로 모든 임베딩 생성)
+    # 2. 텍스트당 1회 호출
     try:
-        # embed_documents를 사용하여 배치 처리
-        embeddings = await asyncio.to_thread(vector_store.embeddings.embed_documents, queries)
+        # aembed_documents를 사용
+        embeddings = await vector_store.embeddings.aembed_documents(queries)
         logger.info(f"임베딩 생성 완료: {len(embeddings)}개")
     except Exception as e:
         logger.error(f"배치 임베딩 생성 오류: {e}")
-        # 오류 발생 시 개별 처리로 폴백
+        # 폴백 없이 raise
         raise
-    # 3. 각 임베딩으로 검색 (병렬 처리)
-    search_tasks = []
+    # 3. Qdrant 배치 API로 1회 요청
+    try:
+        laws_per_section = await vector_store.search_by_vectors(embeddings, limit=2)
+    except Exception as e:
+        logger.error(f"벡터 검색 오류: {e}")
+        laws_per_section = [[] for _ in sections]
 
-    for section, embedding in zip(sections, embeddings):
-        task = search_by_vector_async(vector_store, embedding, section)
-        search_tasks.append((section.number, task))
-
-    # 4. 병렬 검색 실행 (배치로 처리)
-    results = {}
-    batch_size = 10
-
-    for i in range(0, len(search_tasks), batch_size):
-        batch = search_tasks[i:i + batch_size]
-        batch_results = await asyncio.gather(*[task for _, task in batch])
-
-        # 결과 매핑
-        for (clause_num, _), result in zip(batch, batch_results):
-            results[clause_num] = result
+    # 4. 조항별 결과 매핑
+    results = {
+        section.number: {
+            "title": section.title,
+            "content": section.content[:200],
+            "laws": laws,
+        }
+        for section, laws in zip(sections, laws_per_section)
+    }
 
     logger.info(f"법률 검색 완료: {len(results)}개 조항")
     return results
-
-
-async def search_by_vector_async(vector_store, embedding: List[float], section) -> Dict:
-    """벡터로 직접 검색"""
-    try:
-        # similarity_search_by_vector 사용 (임베딩 변환 과정 없음)
-        search_results = await asyncio.to_thread(
-            vector_store.similarity_search_by_vector,
-            embedding=embedding,
-            k=3
-        )
-
-        return {
-            "title": section.title,
-            "content": section.content[:200],
-            "laws": search_results
-        }
-    except Exception as e:
-        logger.error(f"벡터 검색 오류: {e}")
-        return {
-            "title": section.title,
-            "content": section.content[:200],
-            "laws": []
-        }

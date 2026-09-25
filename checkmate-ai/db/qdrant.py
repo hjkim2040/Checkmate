@@ -1,9 +1,7 @@
-from typing import List, Dict
+from typing import List
 
 from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as rest
 from qdrant_client.http.models import Distance, VectorParams
 
@@ -15,22 +13,25 @@ logger = setup_logger(__name__)
 
 class QdrantDB:
     def __init__(self):
-        self.client = None
-        self.vector_store = None
+        self.async_client = None
+        self.embeddings = None
+        self.collection_name = None
 
-    def setup_collection(self, embedding_dim: int, collection_name: str = "legal_documents"):
+    async def setup_collection(self, embeddings, embedding_dim: int, collection_name: str = "legal_documents"):
         """Qdrant 컬렉션 설정"""
 
         try:
-            self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+            self.async_client = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+            self.embeddings = embeddings
+            self.collection_name = collection_name
 
             # 컬렉션 존재 여부 확인
-            collections = self.client.get_collections().collections
-            collection_names = [collection.name for collection in collections]
+            collections = (await self.async_client.get_collections()).collections
+            collection_names = [c.name for c in collections]
 
             if collection_name not in collection_names:
                 # 컬렉션 생성
-                self.client.create_collection(
+                await self.async_client.create_collection(
                     collection_name=collection_name,
                     vectors_config=VectorParams(
                         size=embedding_dim,
@@ -42,13 +43,13 @@ class QdrantDB:
                 )
 
                 # 메타데이터 필드 인덱스 생성
-                self.client.create_payload_index(
+                await self.async_client.create_payload_index(
                     collection_name=collection_name,
                     field_name="metadata.type",
                     field_schema=rest.PayloadSchemaType.KEYWORD
                 )
 
-                self.client.create_payload_index(
+                await self.async_client.create_payload_index(
                     collection_name=collection_name,
                     field_name="metadata.law_name",
                     field_schema=rest.PayloadSchemaType.KEYWORD
@@ -64,69 +65,32 @@ class QdrantDB:
             logger.error(f"Qdrant 설정 오류: {e}")
             raise
 
-    def setup_vector_store(self, embeddings, collection_name: str):
-        """Qdrant 벡터 저장소 설정"""
-
-        try:
-            # API 키가 있는 경우
-            if QDRANT_API_KEY:
-                self.vector_store = QdrantVectorStore(
-                    client=self.client,  # 이미 인증된 client 사용
-                    collection_name=collection_name,
-                    embedding=embeddings
-                )
-
-            logger.info("벡터 저장소 설정 완료")
-            return self.vector_store
-
-        except Exception as e:
-            logger.error(f"벡터 저장소 설정 오류: {e}")
-            raise
-
-    def store_legal_documents(self, legal_texts: List[Dict[str, str]]):
-        """법률 문서를 벡터 저장소에 저장"""
-
-        logger.info(f"법률 문서 {len(legal_texts)}개 저장 중...")
-
-        # 문서 분할기
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            separators=["\n\n", "\n", ".", " "]
+    @staticmethod
+    def _to_document(point) -> Document:
+        """Qdrant 포인트 → LangChain Document (langchain_qdrant 저장 형식 기준)"""
+        payload = point.payload or {}
+        return Document(
+            page_content=payload.get("page_content", ""),
+            metadata=payload.get("metadata", {}),
         )
 
-        total_chunks = 0
-        all_documents = []
+    async def search_by_vectors(self, embeddings: List[List[float]], limit: int = 3) -> List[List[Document]]:
+        """여러 벡터를 한 번의 요청으로 검색. 결과 순서는 입력 순서와 같음"""
+        if not embeddings:
+            return []
 
-        for legal_doc in legal_texts:
-            # 문서를 청크로 분할
-            chunks = text_splitter.split_text(legal_doc["content"])
-            total_chunks += len(chunks)
+        responses = await self.async_client.query_batch_points(
+            collection_name=self.collection_name,
+            requests=[
+                rest.QueryRequest(query=embedding, limit=limit, with_payload=True)
+                for embedding in embeddings
+            ],
+        )
+        return [[self._to_document(p) for p in response.points] for response in responses]
 
-            # Document 객체 생성
-            documents = [
-                Document(
-                    page_content=chunk,
-                    metadata={
-                        "title": legal_doc["title"],
-                        "type": legal_doc["type"],
-                        "law_name": legal_doc.get("law_name", ""),
-                        "article_number": legal_doc.get("article_number", "")
-                    }
-                )
-                for chunk in chunks
-            ]
-            all_documents.extend(documents)
-
-        # 벡터 저장소에 추가
-        self.vector_store.add_documents(all_documents)
-
-        logger.info(f"총 {len(legal_texts)}개 법률 문서, {total_chunks}개 청크 저장 완료")
-
-    def get_vector_store(self):
-        """벡터 스토어 반환"""
-        return self.vector_store
-
+    async def close(self):
+        if self.async_client:
+            await self.async_client.close()
 
 # Qdrant 클라이언트 인스턴스 생성
 qdrant_client = QdrantDB()
