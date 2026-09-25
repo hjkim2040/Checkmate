@@ -3,7 +3,6 @@ from typing import Tuple, Any, List
 
 import numpy as np
 from huggingface_hub import AsyncInferenceClient
-from langchain.embeddings.base import Embeddings
 
 from config.settings import (
     EMBEDDING_REPO_ID, HUGGINGFACE_API_KEY
@@ -14,7 +13,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 logger = setup_logger(__name__)
 
 
-class HuggingFaceInferenceEmbeddings(Embeddings):
+class HuggingFaceEmbedder:
 
     def __init__(self, async_client, model: str, max_concurrency=10):
         self.async_client = async_client
@@ -33,20 +32,14 @@ class HuggingFaceInferenceEmbeddings(Embeddings):
             result = await self.async_client.feature_extraction(text=text, model=self.model)
         return self._to_vector(result)
 
-    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
         return list(await asyncio.gather(*(self._embed_text_async(t) for t in texts)))
 
-    async def aembed_query(self, text: str) -> List[float]:
+    async def embed_query(self, text: str) -> List[float]:
         return await self._embed_text_async(text)
 
     async def aclose(self):
         await self.async_client.close()
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        raise NotImplementedError("비동기 aembed_documents를 사용하세요")
-
-    def embed_query(self, text: str) -> List[float]:
-        raise NotImplementedError("비동기 aembed_query를 사용하세요")
 
 async def init_embedding_model() -> Tuple[Any, int]:
     """임베딩 모델 초기화"""
@@ -61,11 +54,11 @@ async def init_embedding_model() -> Tuple[Any, int]:
 
 
         # LangChain 호환 래퍼로 감싸기
-        embeddings = HuggingFaceInferenceEmbeddings(async_client, model_name)
+        embeddings = HuggingFaceEmbedder(async_client, model_name)
 
         # 테스트 임베딩 생성
         test_text = "차원 확인용 텍스트"
-        embedding_dim = len(await embeddings.aembed_query(test_text))
+        embedding_dim = len(await embeddings.embed_query(test_text))
         logger.info(f"hf 임베딩 모델 로드 성공 (차원: {embedding_dim})")
 
         return embeddings, embedding_dim

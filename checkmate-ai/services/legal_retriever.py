@@ -273,7 +273,7 @@ async def get_clause_specific_laws_parallel(structured_contract, vector_store) -
     # 2. 텍스트당 1회 호출
     try:
         # aembed_documents를 사용
-        embeddings = await vector_store.embeddings.aembed_documents(queries)
+        embeddings = await vector_store.embeddings.embed_documents(queries)
         logger.info(f"임베딩 생성 완료: {len(embeddings)}개")
     except Exception as e:
         logger.error(f"배치 임베딩 생성 오류: {e}")
