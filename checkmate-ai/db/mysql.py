@@ -168,7 +168,7 @@ class MySQLManager:
 
                 return await operation_func(self.pool, *args, **kwargs)
 
-            except (pymysql.err.OperationalError, asyncio.exceptions.CancelledError) as e:
+            except pymysql.err.OperationalError as e:
                 retry_count += 1
                 if retry_count >= max_retries:
                     logger.error(f"MySQL 연결 오류 최대 재시도 횟수 초과: {e}")

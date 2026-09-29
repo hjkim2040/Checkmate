@@ -117,13 +117,23 @@ async def analyze_contract_concur(
         ("questions", generate_questions(llm, structured_contract, category_name, content, contract_type))
     ]
 
+    cid = structured_contract.contract_id
+
     try:
-        responses = await asyncio.gather(*[task for _, task in analysis_tasks])
+        responses = await asyncio.gather(*[task for _, task in analysis_tasks],
+                                         return_exceptions=True)
         # 결과 매핑
-        results = {
-            name: response
-            for (name, _), response in zip(analysis_tasks, responses)
-        }
+        results = {}
+        failed_tasks = []
+        for (name, _), response in zip(analysis_tasks, responses):
+            if isinstance(response, BaseException):
+                logger.error(f"[{cid}] {name} 분석 실패: {response}", exc_info=response)
+                failed_tasks.append(name)
+            else:
+                results[name] = response
+
+        if failed_tasks:
+            raise RuntimeError(f"[{cid}] 분석 태스크 실패: {failed_tasks}")
 
         # 각 분석 결과 저장
         await save_analysis_results(
@@ -139,7 +149,8 @@ async def analyze_contract_concur(
 
         return {
             "ai_analysis_report_id": str(ai_analysis_report_id),
-            "analysis_completed": True
+            "analysis_completed": True,
+            "failed_tasks": failed_tasks,
         }
 
     except Exception as e:
