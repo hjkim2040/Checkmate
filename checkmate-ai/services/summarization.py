@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -53,19 +54,12 @@ async def _generate_summary_with_retry(all_text: str) -> str:
         raise
 
 
-async def generate_summary(all_text: str, contract_id: int, mongo_db) -> str:
+async def generate_summary(all_text: str, contract_id: int) -> Optional[str]:
     """
     전체 문서를 요약하고 결과를 반환합니다.
     DB에 이미 요약이 있다면 그것을 반환합니다.
     """
     try:
-        # 기존 요약이 있는지 확인
-        existing_summary = await check_existing_summary(contract_id, mongo_db)
-        if existing_summary:
-            logger.info(f"[{contract_id}] 기존 요약 사용")
-            return existing_summary
-
-        # 기존 요약이 없으면 새로 생성
         logger.info(f"[{contract_id}] 새로운 요약 생성 시작")
         summary = await _generate_summary_with_retry(all_text)
         logger.info(f"[{contract_id}] 요약 생성 완료 (길이: {len(summary)})")
@@ -73,7 +67,7 @@ async def generate_summary(all_text: str, contract_id: int, mongo_db) -> str:
     except Exception as e:
         logger.error(f"[{contract_id}] 요약 생성 실패: {e}", exc_info=True)
         # 기본 요약 반환
-        return "요약 생성에 실패했습니다. 잠시 후 다시 시도해주세요."
+        return None
 
 
 async def check_existing_summary(contract_id: int, mongo_db) -> str:

@@ -249,7 +249,7 @@ async def save_analysis_results(
                 # 에러 확인
                 for idx, result in enumerate(batch_results):
                     if isinstance(result, Exception):
-                        logger.error(f"DB 저장 작업 {i + idx} 실패: {results}")
+                        logger.error(f"DB 저장 작업 {i + idx} 실패: {result}")
         except Exception as e:
             logger.error(f"MongoDB 저장 중 오류 발생: {e}")
 

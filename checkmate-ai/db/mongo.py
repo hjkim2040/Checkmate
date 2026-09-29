@@ -14,6 +14,8 @@ from config.settings import (
 )
 from models.enums import Importance, RiskLevel
 
+SUMMARY_FAILED_FIELD = "generationFailed"
+SUMMARY_FAILED_MESSAGE = "요약 생성에 실패했습니다. 잠시 후 다시 시도해주세요."
 
 class MongoDBManager:
     def __init__(self):
@@ -75,14 +77,29 @@ class MongoDBManager:
         logger.info(f"AI 분석 보고서 저장 완료: {ai_analysis_report_id}")
         return ai_analysis_report_id
 
-    async def save_summary_report(self, ai_analysis_report_id: ObjectId, description: str) -> ObjectId:
+    async def save_summary_report(
+            self,
+            ai_analysis_report_id: ObjectId,
+            description: str,
+            generation_failed: bool = False
+    ) -> ObjectId:
         """요약 보고서 저장"""
+
+        collection = self.collections.get("summary_report")
+        await collection.delete_many({
+            "aiAnalysisReportId": ai_analysis_report_id,
+            SUMMARY_FAILED_FIELD: True,
+        })
+
         doc = {
             "aiAnalysisReportId": ai_analysis_report_id,
             "description": description,
             "createdAt": datetime.now()
         }
-        result = await self.collections.get("summary_report").insert_one(doc)
+        if generation_failed:
+            doc[SUMMARY_FAILED_FIELD] = True
+
+        result = await collection.insert_one(doc)
         return result.inserted_id
 
     async def save_improvement_report(self, ai_analysis_report_id: ObjectId, description: str):
@@ -149,7 +166,8 @@ class MongoDBManager:
     async def has_summary_report(self, ai_analysis_report_id: ObjectId) -> bool:
         """요약 리포트 존재 여부"""
         doc = await self.collections.get("summary_report").find_one(
-            {"aiAnalysisReportId": ai_analysis_report_id}
+            {"aiAnalysisReportId": ai_analysis_report_id,
+             SUMMARY_FAILED_FIELD: {"$ne" : True}},
         )
         return doc is not None
 

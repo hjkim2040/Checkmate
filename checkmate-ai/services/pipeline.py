@@ -2,7 +2,7 @@ import asyncio
 from typing import Union
 from collections.abc import Collection
 
-from db.mongo import MongoDBManager
+from db.mongo import MongoDBManager, SUMMARY_FAILED_MESSAGE
 from db.mysql import MySQLManager
 from db.redis import OCRCache
 from models.schemas import OcrRequest, QuestionGenerationRequest
@@ -116,7 +116,7 @@ async def process_contract_pipeline(
 
             # 3. 요약 생성
             if not existing_data['summary']:
-                summary_task = lambda: generate_summary(all_text, cid, mongo)
+                summary_task = lambda: generate_summary(all_text, cid)
                 tasks.append(("summary", summary_task))
 
 
@@ -148,9 +148,15 @@ async def process_contract_pipeline(
                 ("required_sections", lambda: get_contract_type_requirements(contract_type, cname, llm)),
                 ("clause_laws", lambda: get_clause_specific_laws_parallel(structured_contract, vector_store))
             ]
-            if summary_result:
+            if "summary" in results:
+                if summary_result:
+                    save_summary = lambda: mongo.save_summary_report(ai_analysis_report_id, summary_result)
+                else:
+                    save_summary = lambda: mongo.save_summary_report(
+                        ai_analysis_report_id, SUMMARY_FAILED_MESSAGE, generation_failed=True
+                    )
                 second_round_tasks.append(
-                    ("summary_save", lambda: mongo.save_summary_report(ai_analysis_report_id, summary_result)),
+                    ("summary_save", save_summary),
                 )
 
             second_results = await _execute_parallel_tasks(
