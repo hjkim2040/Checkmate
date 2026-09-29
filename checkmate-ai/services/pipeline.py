@@ -7,7 +7,7 @@ from db.mysql import MySQLManager
 from db.redis import OCRCache
 from models.schemas import OcrRequest, QuestionGenerationRequest
 from nlp.llm import init_llm_model
-from services.contract_analyzer import analyze_contract_parallel, generate_and_save_questions
+from services.contract_analyzer import analyze_contract_concur, generate_and_save_questions
 from services.contract_parser import structure_contract_with_gpt
 from services.contract_state import cleanup_incomplete_data
 from services.decryption import DecryptionService
@@ -168,7 +168,7 @@ async def process_contract_pipeline(
 
             # 10. 최종 분석 (모든 준비가 완료된 후)
             logger.info(f"[{cid}] 최종 분석 시작")
-            await analyze_contract_parallel(
+            await analyze_contract_concur(
                 llm,
                 structured_contract,
                 req.contract_category_id,

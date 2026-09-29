@@ -66,7 +66,7 @@ async def analyze_with_retry(llm, prompt_template, input_data: dict) -> dict:
     return parsing_data
 
 
-async def analyze_contract_parallel(
+async def analyze_contract_concur(
         llm,
         structured_contract: StructuredContract,
         contract_category_id: int,
@@ -236,33 +236,29 @@ async def save_analysis_results(
     # 4. 질문 저장
     questions_data = results.get("questions") or []
 
-    if save_tasks:
-        try:
-            # 최대 10개씩 배치로 실행 (DB 부하 방지)
-            batch_size = 10
-            for i in range(0, len(save_tasks), batch_size):
-                batch = save_tasks[i:i + batch_size]
+    failed = []
+    batch_size = 10
+    for i in range(0, len(save_tasks), batch_size):
+        batch = save_tasks[i:i + batch_size]
+        batch_results = await asyncio.gather(*batch, return_exceptions=True)
 
-                # 병렬 실행
-                batch_results = await asyncio.gather(*batch, return_exceptions=True)
+        # 에러 확인
+        for idx, result in enumerate(batch_results):
+            if isinstance(result, BaseException):
+                logger.error(f"DB 저장 작업 {i + idx} 실패: {result!r}")
+                failed.append(result)
 
-                # 에러 확인
-                for idx, result in enumerate(batch_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"DB 저장 작업 {i + idx} 실패: {result}")
-        except Exception as e:
-            logger.error(f"MongoDB 저장 중 오류 발생: {e}")
-
+    if failed:
+        raise RuntimeError(
+            f"[{contract_id}] 분석 결과 저장 실패: {len(failed)}/{len(save_tasks)}건"
+        ) from failed[0]
     # MySQL 질문 배치 저장 (별도 처리)
     if questions_data:
-        try:
-            await mysql_manager.save_questions_batch(
-                contract_id,
-                contract_category_id,
-                questions_data
-            )
-        except Exception as e:
-            logger.error(f"질문 배치 저장 실패: {e}")
+        await mysql_manager.save_questions_batch(
+            contract_id,
+            contract_category_id,
+            questions_data
+        )
 
     logger.info(f"분석 결과 저장 완료")
 
