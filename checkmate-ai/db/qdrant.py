@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from langchain.schema import Document
 from qdrant_client import AsyncQdrantClient
@@ -71,10 +71,14 @@ class QdrantDB:
         payload = point.payload or {}
         return Document(
             page_content=payload.get("page_content", ""),
-            metadata=payload.get("metadata", {}),
+            metadata={**payload.get("metadata", {}), "score": point.score},
         )
 
-    async def search_by_vectors(self, embeddings: List[List[float]], limit: int = 3) -> List[List[Document]]:
+    async def search_by_vectors(
+            self,
+            embeddings: List[List[float]],
+            limit: int = 50,
+            score_threshold: Optional[float] = None) -> List[List[Document]]:
         """여러 벡터를 한 번의 요청으로 검색. 결과 순서는 입력 순서와 같음"""
         if not embeddings:
             return []
@@ -82,7 +86,7 @@ class QdrantDB:
         responses = await self.async_client.query_batch_points(
             collection_name=self.collection_name,
             requests=[
-                rest.QueryRequest(query=embedding, limit=limit, with_payload=True)
+                rest.QueryRequest(query=embedding, limit=limit, score_threshold=score_threshold, with_payload=True)
                 for embedding in embeddings
             ],
         )

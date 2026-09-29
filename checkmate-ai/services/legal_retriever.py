@@ -1,6 +1,7 @@
 import json
 import re
 from typing import List, Dict
+from config.settings import LEGAL_SCORE_THRESHOLD
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -278,7 +279,10 @@ async def get_clause_specific_laws_concur(structured_contract, vector_store) -> 
         raise
     # 3. Qdrant 배치 API로 1회 요청
     try:
-        laws_per_section = await vector_store.search_by_vectors(embeddings, limit=2)
+        laws_per_section = await vector_store.search_by_vectors(
+            embeddings,
+            limit=50,
+            score_threshold=LEGAL_SCORE_THRESHOLD)
     except Exception as e:
         logger.error(f"벡터 검색 오류: {e}")
         laws_per_section = [[] for _ in sections]
@@ -287,7 +291,7 @@ async def get_clause_specific_laws_concur(structured_contract, vector_store) -> 
     results = {
         section.number: {
             "title": section.title,
-            "content": section.content[:200],
+            "content": section.content,
             "laws": laws,
         }
         for section, laws in zip(sections, laws_per_section)

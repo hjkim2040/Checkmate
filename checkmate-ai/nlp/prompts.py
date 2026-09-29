@@ -85,6 +85,7 @@ missing_sections_prompt = ChatPromptTemplate.from_messages([
 {required_sections}
 
 조항 관련 법률 정보:
+아래 법률은 검색으로 찾은 후보이며, 조항과 관련이 없으면 무시하라. 인용할 때는 법률명과 조문을 밝혀라.
 {legal_context}
 
 다음 사항들을 분석해주세요:
@@ -129,6 +130,7 @@ improvements_prompt = ChatPromptTemplate.from_messages([
 {content}
 
 조항 관련 법률 정보:
+아래 법률은 검색으로 찾은 후보이며, 조항과 관련이 없으면 무시하라. 인용할 때는 법률명과 조문을 밝혀라.
 {legal_context}
 
 **개선 권장사항**:
@@ -172,6 +174,7 @@ risk_analysis_prompt = ChatPromptTemplate.from_messages([
 {content}
 
 조항 관련 법률 정보:
+아래 법률은 검색으로 찾은 후보이며, 조항과 관련이 없으면 무시하라. 인용할 때는 법률명과 조문을 밝혀라.
 {legal_context}
 
 **위험한 조항 분석**:

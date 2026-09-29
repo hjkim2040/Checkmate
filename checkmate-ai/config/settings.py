@@ -11,6 +11,9 @@ EMBEDDING_REPO_ID = os.environ.get("EMBEDDING_REPO_ID")
 
 QDRANT_URL = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
+# 법률 검색 유사도 하한. 평가셋으로 정하기 전까지는 비워 둔다 (None = 기준 없음, 기존 동작)
+_legal_threshold = os.environ.get("LEGAL_SCORE_THRESHOLD")
+LEGAL_SCORE_THRESHOLD = float(_legal_threshold) if _legal_threshold else None
 
 MONGO_HOST = os.environ.get("MONGO_HOST", "localhost")
 MONGO_PORT = os.environ.get("MONGO_PORT", "27017")
