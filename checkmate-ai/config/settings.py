@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+LLM_TIMEOUT_SECONDS = os.getenv("LLM_TIMEOUT_SECONDS")
 
 EMBEDDING_REPO_ID = os.environ.get("EMBEDDING_REPO_ID")
 

@@ -4,7 +4,7 @@ from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 
 from config.settings import (
-    OPENAI_API_KEY
+    OPENAI_API_KEY, LLM_TIMEOUT_SECONDS
 )
 from utils.logging import setup_logger
 
@@ -48,7 +48,9 @@ class LLMManager:
                 model="gpt-4.1",
                 api_key=OPENAI_API_KEY,
                 temperature=temperature,
-                max_tokens=4000
+                max_tokens=4000,
+                max_retries=2,
+                timeout=LLM_TIMEOUT_SECONDS,
             )
             logger.info("OpenAI 모델 로드 성공")
 

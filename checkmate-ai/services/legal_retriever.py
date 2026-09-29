@@ -3,7 +3,6 @@ import re
 from typing import List, Dict
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from openai import APIConnectionError, APITimeoutError, RateLimitError, InternalServerError
 
 from nlp.llm import init_llm_model
 from nlp.prompts import required_sections_prompt
@@ -21,9 +20,7 @@ class EmptyLegalInfoError(Exception):
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(
-        (EmptyLegalInfoError, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError)
-    ),
+    retry=retry_if_exception_type(EmptyLegalInfoError),
     reraise=True
 )
 async def get_sections_from_gpt(llm, contract_type: str, existing_sections_text: str, category_name: str) -> list:

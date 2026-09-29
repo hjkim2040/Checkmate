@@ -4,7 +4,6 @@ import re
 from typing import Dict, Any, List, Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from openai import APIConnectionError, APITimeoutError, RateLimitError, InternalServerError
 
 from models.schemas import StructuredContract
 from nlp.prompts import (
@@ -29,9 +28,7 @@ logger = setup_logger(__name__)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(
-        (EmptyResponseError, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError)
-    ),
+    retry=retry_if_exception_type(EmptyResponseError),
     reraise=True
 )
 async def analyze_with_retry(llm, prompt_template, input_data: dict) -> dict:
