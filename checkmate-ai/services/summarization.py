@@ -49,10 +49,8 @@ summarization_chain = (
 async def _generate_summary_with_retry(all_text: str) -> str:
     """LangChain과 retry 데코레이터를 이용한 요약 생성 함수"""
     try:
-        # 텍스트 길이 제한 (10,000자)
-        truncated_text = all_text[:10000]
         # summarization_chain 실행
-        result = await summarization_chain.ainvoke(truncated_text)
+        result = await summarization_chain.ainvoke(all_text)
         if not result or not result.strip():
             logger.error("빈 요약을 반환하여 재시도합니다.")
             raise EmptySummaryError("Empty Summary From LLM")

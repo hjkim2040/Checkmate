@@ -14,9 +14,6 @@ from nlp.prompts import (
 )
 from utils.logging import setup_logger
 
-# LLM 입력 토큰 제한을 위한 계약서 본문 최대 길이
-CONTENT_CHAR_LIMIT = 15000
-
 # 빈 응답 예외 클래스
 class EmptyResponseError(Exception):
     pass
@@ -93,7 +90,7 @@ async def analyze_contract_concur(
         "title": structured_contract.metadata.title,
         "contract_type": contract_type,
         "category_name": category_name,
-        "content": content,  # 토큰 제한을 위해 길이 제한
+        "content": content,
         "legal_context": legal_context
     }
 
@@ -154,6 +151,13 @@ async def analyze_contract_concur(
         logger.error(f"계약서 분석 오류: {e}")
         raise
 
+def _excerpt(text: str, limit: int = 200) -> str:
+    """조문을 limit 안의 마지막 문장 끝에서 자른다. 문장 끝이 없으면 limit에서 자른다."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = cut.rfind("다.")
+    return (cut[:end + 2] if end > 0 else cut) + "..."
 
 def format_clause_laws(clause_specific_laws: Dict) -> str:
     """조항별 법률 정보 포매팅"""
@@ -170,19 +174,19 @@ def format_clause_laws(clause_specific_laws: Dict) -> str:
                 if hasattr(law, 'metadata'):
                     law_name = law.metadata.get('law_name', '알 수 없음')
                     article = law.metadata.get('article_number', '')
-                    content = law.page_content[:200] if hasattr(law, 'page_content') else str(law)[:200]
+                    content = _excerpt(law.page_content if hasattr(law, 'page_content') else str(law))
                 else:
                     law_name = "관련 법률"
                     article = ""
-                    content = str(law)[:200]
+                    content = _excerpt(str(law))
 
-                formatted += f"  • {law_name} {article}: {content}...\n"
+                formatted += f"  • {law_name} {article}: {content}\n"
         else:
             formatted += "  • 관련 법률 없음\n"
 
         formatted += "\n"
 
-    return formatted[:3000]  # 전체 길이 제한
+    return formatted
 
 
 async def save_analysis_results(
@@ -272,7 +276,6 @@ async def save_analysis_results(
 
 def build_contract_content(
         structured_contract: StructuredContract,
-        limit: int = CONTENT_CHAR_LIMIT
 ) -> str:
     """구조화된 계약서를 LLM 입력용 단일 텍스트로 변환
 
@@ -283,7 +286,7 @@ def build_contract_content(
         f"{section.number} {section.title}\n{section.content}"
         for section in structured_contract.sections
     )
-    return content[:limit]
+    return content
 
 async def generate_questions(
         llm,

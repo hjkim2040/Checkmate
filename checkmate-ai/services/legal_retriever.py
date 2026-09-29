@@ -256,7 +256,7 @@ async def get_contract_type_requirements(contract_type: str, category_name:str, 
     return required_sections
 
 
-async def get_clause_specific_laws_parallel(structured_contract, vector_store) -> Dict[str, Dict]:
+async def get_clause_specific_laws_concur(structured_contract, vector_store) -> Dict[str, Dict]:
     """모든 조항에 대한 법률 검색 (임베딩 병렬 생성 + 배치 벡터 검색)"""
 
     contract_type = structured_contract.metadata.contract_type

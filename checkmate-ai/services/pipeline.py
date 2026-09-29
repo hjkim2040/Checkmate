@@ -11,7 +11,7 @@ from services.contract_analyzer import analyze_contract_concur, generate_and_sav
 from services.contract_parser import structure_contract_with_gpt
 from services.contract_state import cleanup_incomplete_data
 from services.decryption import DecryptionService
-from services.legal_retriever import get_contract_type_requirements, get_clause_specific_laws_parallel
+from services.legal_retriever import get_contract_type_requirements, get_clause_specific_laws_concur
 from services.ocr_engine import OcrEngine
 from services.postprocessing import postprocessing_pipeline
 from services.summarization import generate_summary
@@ -126,7 +126,7 @@ async def process_contract_pipeline(
             structured_contract_task = lambda: structure_contract_with_gpt(all_text, cid, cname, llm)
             tasks.append(("structure", structured_contract_task))
 
-            results = await _execute_parallel_tasks(tasks)
+            results = await _execute_concur_tasks(tasks)
 
             summary_result = results.get("summary")
             structured_contract = results.get("structure")
@@ -146,7 +146,7 @@ async def process_contract_pipeline(
             second_round_tasks = [
                 ("mysql_save", lambda: mysql.save_contract_clauses(cid, sections_data)),
                 ("required_sections", lambda: get_contract_type_requirements(contract_type, cname, llm)),
-                ("clause_laws", lambda: get_clause_specific_laws_parallel(structured_contract, vector_store))
+                ("clause_laws", lambda: get_clause_specific_laws_concur(structured_contract, vector_store))
             ]
             if "summary" in results:
                 if summary_result:
@@ -159,7 +159,7 @@ async def process_contract_pipeline(
                     ("summary_save", save_summary),
                 )
 
-            second_results = await _execute_parallel_tasks(
+            second_results = await _execute_concur_tasks(
                 second_round_tasks,
                 optional={"required_sections", "clause_laws"})
 
@@ -193,7 +193,7 @@ async def process_contract_pipeline(
         raise
 
 
-async def _execute_parallel_tasks(tasks, optional: Collection[str] = frozenset()):
+async def _execute_concur_tasks(tasks, optional: Collection[str] = frozenset()):
     """병렬 태스크 실행 헬퍼 함수"""
     results = {}
 
