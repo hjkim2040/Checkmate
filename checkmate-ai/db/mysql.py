@@ -3,6 +3,7 @@ from datetime import datetime
 import asyncio
 import pymysql
 import aiomysql
+from contextlib import asynccontextmanager
 
 from config.settings import (
     MYSQL_HOST, MYSQL_PORT, MYSQL_USERNAME,
@@ -17,6 +18,26 @@ logger = setup_logger(__name__)
 class MySQLManager:
     def __init__(self):
         self.pool = None
+
+    @asynccontextmanager
+    async def _transaction(self, pool):
+        """커넥션 하나에서 트랜잭션을 열고, 블록이 끝나면 커밋, 예외면 롤백한다.
+
+        풀은 autocommit=True지만 BEGIN으로 명시적 트랜잭션을 열면
+        COMMIT/ROLLBACK 전까지 자동 커밋되지 않는다.
+        """
+        async with pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    yield cur
+                await conn.commit()
+            except BaseException:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass  # 연결이 끊긴 경우엔 서버가 이미 롤백함
+                raise
 
     async def connect(self):
         """MySQL 연결"""
@@ -66,32 +87,30 @@ class MySQLManager:
     async def save_contract_clauses(self, contract_id: int, sections: list):
         """계약서 조항들을 저장"""
         async def operation(pool, cid, secs):
-
-            async with self.pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    values = []
-                    for section in sections:
-                        # clause_type을 Enum으로 변환
-                        clause_type = self._convert_to_clause_type(section.get('type', 'standard'))
-                        values.append((
-                            contract_id,
-                            section.get('number', ''),
-                            section.get('title', ''),
-                            section.get('content', ''),
-                            clause_type.value,
-                            datetime.now()
-                        ))
-                    await cur.execute(
-                        "DELETE FROM clause WHERE contract_id = %s", (contract_id,)
-                    )
-                    sql = """
-                          INSERT INTO clause
-                          (contract_id, clause_number, clause_title, clause_content, clause_type, created_at)
-                          VALUES (%s, %s, %s, %s, %s, %s) \
-                          """
-                    await cur.executemany(sql, values)
-                    logger.info(f"계약서 {contract_id}의 조항 저장 완료")
-                    return True
+            async with self._transaction(pool) as cur:
+                values = []
+                for section in sections:
+                    # clause_type을 Enum으로 변환
+                    clause_type = self._convert_to_clause_type(section.get('type', 'standard'))
+                    values.append((
+                        contract_id,
+                        section.get('number', ''),
+                        section.get('title', ''),
+                        section.get('content', ''),
+                        clause_type.value,
+                        datetime.now()
+                    ))
+                await cur.execute(
+                    "DELETE FROM clause WHERE contract_id = %s", (contract_id,)
+                )
+                sql = """
+                      INSERT INTO clause
+                      (contract_id, clause_number, clause_title, clause_content, clause_type, created_at)
+                      VALUES (%s, %s, %s, %s, %s, %s) \
+                      """
+                await cur.executemany(sql, values)
+                logger.info(f"계약서 {contract_id}의 조항 저장 완료")
+                return True
 
         return await self.with_retry(operation, contract_id, sections)
 
@@ -100,40 +119,39 @@ class MySQLManager:
         if not questions:
             return 0 # 질문이 없으면 아무 작업도 하지 않음
         async def operation(pool, cid, cat_id, detail):
-            async with self.pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    # 다중 INSERT 쿼리 준비
-                    values = []
-                    for question in questions:
-                        # 질문 형식 처리
-                        if isinstance(question, dict):
-                            question_text = question.get("question", "")
-                        else:
-                            question_text = str(question)
+            async with self._transaction(pool) as cur:
+                # 다중 INSERT 쿼리 준비
+                values = []
+                for question in questions:
+                    # 질문 형식 처리
+                    if isinstance(question, dict):
+                        question_text = question.get("question", "")
+                    else:
+                        question_text = str(question)
 
-                        if question_text.strip():
-                            values.append((
-                                contract_id,
-                                contract_category_id,
-                                question_text,
-                                datetime.now()
-                            ))
+                    if question_text.strip():
+                        values.append((
+                            contract_id,
+                            contract_category_id,
+                            question_text,
+                            datetime.now()
+                        ))
 
-                    if values:
-                        # 배치 INSERT 실행
-                        await cur.execute(
-                            "DELETE FROM question WHERE contract_id = %s", (contract_id,)
-                        )
-                        sql = """
-                              INSERT INTO question
-                                  (contract_id, contract_category_id, question_detail, created_at)
-                              VALUES (%s, %s, %s, %s) \
-                              """
-                        await cur.executemany(sql, values)
-                        logger.info(f"[{contract_id}] {len(values)}개 질문 일괄 저장 완료")
-                        return len(values)
+                if values:
+                    # 배치 INSERT 실행
+                    await cur.execute(
+                        "DELETE FROM question WHERE contract_id = %s", (contract_id,)
+                    )
+                    sql = """
+                          INSERT INTO question
+                              (contract_id, contract_category_id, question_detail, created_at)
+                          VALUES (%s, %s, %s, %s) \
+                          """
+                    await cur.executemany(sql, values)
+                    logger.info(f"[{contract_id}] {len(values)}개 질문 일괄 저장 완료")
+                    return len(values)
 
-                    return 0
+                return 0
 
         return await self.with_retry(operation, contract_id, contract_category_id, questions)
 
