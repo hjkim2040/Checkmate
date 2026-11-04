@@ -52,8 +52,6 @@ async def init_embedding_model() -> Tuple[Any, int]:
         )
         model_name = EMBEDDING_REPO_ID
 
-
-        # LangChain 호환 래퍼로 감싸기
         embeddings = HuggingFaceEmbedder(async_client, model_name)
 
         # 테스트 임베딩 생성
