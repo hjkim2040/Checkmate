@@ -119,7 +119,6 @@ async def process_contract_pipeline(
                 summary_task = lambda: generate_summary(all_text, cid)
                 tasks.append(("summary", summary_task))
 
-
             # 4. 구조화 및 분석
             logger.info(f"[{cid}] 구조화 및 분석 시작")
 
@@ -132,6 +131,7 @@ async def process_contract_pipeline(
             structured_contract = results.get("structure")
 
             contract_type = structured_contract.metadata.contract_type
+
             # 5. MySQL에 조항 저장
             sections_data = []
             for section in structured_contract.sections:
@@ -142,7 +142,7 @@ async def process_contract_pipeline(
                     'type': section.type,
                 })
 
-            # 8. 구조화 완료 후 병렬 처리할 태스크들
+            # 6. 구조화 완료 후 병렬 처리할 태스크들
             second_round_tasks = [
                 ("mysql_save", lambda: mysql.save_contract_clauses(cid, sections_data)),
                 ("required_sections", lambda: get_contract_type_requirements(contract_type, cname, llm)),
@@ -166,7 +166,7 @@ async def process_contract_pipeline(
             required_sections = second_results.get("required_sections") or []
             clause_specific_laws = second_results.get("clause_laws") or {}
 
-            # 10. 최종 분석 (모든 준비가 완료된 후)
+            # 7. 최종 분석 (모든 준비가 완료된 후)
             logger.info(f"[{cid}] 최종 분석 시작")
             await analyze_contract_concur(
                 llm,
