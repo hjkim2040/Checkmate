@@ -1,3 +1,58 @@
+## 👤 개인 기여 — 김성찬 (AI Server / Backend)
+
+> 6인 팀 프로젝트입니다. 아래는 제가 담당한 부분이며, 원본 팀 README는 그 아래에 그대로 두었습니다.
+> 
+> 📄 포트폴리오: [링크](https://trusting-gooseberry-30e.notion.site/Checkmate-AI-3b7f2546fed4804cae7dca9d353d83e8?source=copy_link)
+
+### 담당 범위
+- **AI 계약서 분석 서버(FastAPI) 전담** : OCR 결과 구조화, 누락·위험·개선 분석, 요약, 확인 질문 생성
+- **RAG 법률 검색** : 법령 18종을 조문 단위로 Qdrant에 적재, 조항별 관련 법령을 분석 근거로 주입
+- **서버 간 비동기 연동** : Spring Boot 이벤트 발행 → FastAPI 백그라운드 처리 → 웹훅 콜백
+
+### 코드 위치
+**AI 서버 (전담)** : [`checkmate-ai/`](https://github.com/hjkim2040/Checkmate/tree/85b951fb1c3112b31189bdc292c21a529531c8fe/checkmate-ai)
+
+| 구분 | 경로                                                                                                                                                                                                                                                                                            |
+|---|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 분석 파이프라인 (3라운드 병렬 실행) | [`/pipeline.py`](https://github.com/hjkim2040/Checkmate/blob/85b951fb1c3112b31189bdc292c21a529531c8fe/checkmate-ai/services/pipeline.py)                                                                                                                                                      |
+| 프롬프트 4종 | [`/prompts.py`](https://github.com/hjkim2040/Checkmate/blob/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-ai/nlp/prompts.py)                                                                                                                                                             |
+| RAG 법령 검색 · 비동기 임베딩 | [`/embeddings.py`](https://github.com/hjkim2040/Checkmate/blob/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-ai/nlp/embeddings.py), [`/legal_retriever.py`](https://github.com/hjkim2040/Checkmate/blob/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-ai/services/legal_retriever.py) |
+| 웹훅 콜백 | [`/webhook.py`](https://github.com/hjkim2040/Checkmate/blob/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-ai/services/webhook.py)                                                                                                                                                        |
+
+**Spring 연동 (담당 부분만)** 
+
+| 구분 | 경로                                                                                                                                                                                                                     |
+|-|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| AFTER_COMMIT 이벤트 리스너 | [`/AiAnalysisListener.java`](https://github.com/hjkim2040/Checkmate/blob/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-be/src/main/java/com/checkmate/domain/aianalysisreport/service/AiAnalysisListener.java)    |
+| 이벤트 발행 지점 | [계약서 업로드](https://github.com/hjkim2040/Checkmate/blob/c2044792e98c9c45fd60687eabe619ce44da6148/checkmate-be/src/main/java/com/checkmate/domain/contract/service/ContractService.java#L82-L85), [생성 계약서 저장](https://github.com/hjkim2040/Checkmate/blob/c2044792e98c9c45fd60687eabe619ce44da6148/checkmate-be/src/main/java/com/checkmate/domain/contract/service/ContractGeneratedFileService.java#L124-L130) |
+| FastAPI 호출 (WebClient) | [`/WebClientConfig.java`](https://github.com/hjkim2040/Checkmate/blob/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-be/src/main/java/com/checkmate/global/config/WebClientConfig.java#L43-L98)                    |
+| 웹훅 수신 | [`/webhook`](https://github.com/hjkim2040/Checkmate/tree/bfbfab6ef036b417612755150379bf12c5a52fd7/checkmate-be/src/main/java/com/checkmate/domain/webhook)                                                             |
+
+### 주요 개선
+| 문제 | 해결 | 결과 | 코드       |
+|---|---|---|----------|
+| 단일 프롬프트로 응답 지연·품질 저하 | 목적별 4개 분리 + asyncio.gather 병렬 실행 | 응답 2분 이상 → 1분 내외 | [코드](링크) |
+| LLM의 근거 없는 판단 | 법령 18종 조문 단위 RAG 구축 | 분석이 실제 조문을 참고 | [코드](링크) |
+| 조항별 직렬 임베딩·검색 | 비동기 임베딩 + Qdrant 배치 검색 | 벡터 검색 요청 N회 → 1회 | [코드](링크) |
+| 1분 이상 걸리는 분석으로 타임아웃 위험 | AFTER_COMMIT 이벤트 + BackgroundTasks + 웹훅 | AI 서버 장애와 업로드 기능 분리 | [코드](링크) |
+
+### 처리 흐름
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Spring Boot
+    participant A as FastAPI (AI)
+    C->>S: 계약서 업로드
+    S-->>C: 즉시 응답
+    S->>A: 커밋 후(AFTER_COMMIT) 분석 요청
+    A-->>S: 즉시 응답
+    A->>A: BackgroundTasks로 분석 파이프라인 실행
+    A->>S: 웹훅 콜백 (성공/실패, X-API-Key)
+    S->>C: WebSocket 완료 알림
+```
+
+---
+
 # 목차
 
 1. [프로젝트 소개](#프로젝트-소개)
@@ -12,7 +67,7 @@
 #### 1. 개요
 
 - 서비스 명 : CHECKMATE(체크메이트)
-- 한 줄 소개 : SSAFY 12기 2학기 자율 프로젝트
+- 한 줄 소개 : AI 기반 계약서 분석 서비스
 - 기간 : 2025.04.14 ~ 2025.05.22 (39일)
 
 #### 2. 기획 배경
@@ -35,12 +90,12 @@
 ![image](docs/asset/모바일%20분석%20파일%20업로드.gif)
 - 계약서 유형을 선택하면 업로드 할 수 있는 페이지로 전환
 - 업로드 페이지에서 HWP, PDF, JPG, PNG 확장자의 계약서를 업로드 할 수 있고, 업로드 되면 ClamAV를 통해 바이러스 검사 진행
-- 안전한 파일인게 확인되면 AES-GCM 암호화 하여 DEK를 이용해 2-of-2 방식으로 각기 다른 데이터베이스에 분산 저장장
+- 안전한 파일인게 확인되면 AES-GCM 암호화 하여 DEK를 이용해 2-of-2 방식으로 각기 다른 데이터베이스에 분산 저장
 
 ![image](docs/asset/분석페이지.gif)
 ![image](docs/asset/모바일%20분석결과%20대시보드.gif)
 - 분석이 완료되면 WebSocket+Stomp를 이용하여 실시간 알림을 제공
-- 분석 결과는 LangChain에 OpenAPI를 이용하여 비동기 병렬형태로 진행
+- 분석 결과는 LangChain에 OpenAI API를 이용하여 비동기 병렬형태로 진행
 - 분석 프롬프트는 RAG를 이용하여 사전 저장된 Qdrant 법률 데이터를 이용하여 벡터 조회를 통해 나온 결과를 프롬프트에 증강하여 신뢰성과 안정성 증가
 
 #### 계약서 작성 가이드
@@ -74,8 +129,7 @@
 - 저장하기 버튼을 누르면 pdf형태로 사용자에게 제공
 
 #### 전자서명
-![image]()
-- DropSignAPI를 이용하여 전자서명 구현현
+- DropSignAPI를 이용하여 전자서명 구현
 
 
 <br/>
@@ -117,21 +171,6 @@
 ### 협업 툴
 <img src="https://img.shields.io/badge/Mattermost-0058CC?style=for-the-badge&logo=mattermost&logoColor=white"/>
 <img src="https://img.shields.io/badge/GitLab-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white"/> <br />
-
-
-### <code>[프로젝트 구조]</code>
-
-### Frontend ()
-
-```
-
-```
-
-### Backend (Spring Boot)
-
-```
-
-```
 
 <br/>
 
