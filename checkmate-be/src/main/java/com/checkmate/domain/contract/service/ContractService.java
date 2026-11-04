@@ -79,7 +79,7 @@ public class ContractService {
         FileNumberResponse response = contractFileService.uploadContractFiles(contract, request.getFiles());
         contract.setPageNo(response.getPageNo());
 
-        // 트랜잭션 완료 후 분석 이벤트 발행
+        // 분석 이벤트 발행 (리스너는 트랜잭션 커밋 후 실행됨)
         applicationEventPublisher.publishEvent(
             new ContractUploadCompletedEvent(contract.getId(), category.getId(), category.getName())
         );
