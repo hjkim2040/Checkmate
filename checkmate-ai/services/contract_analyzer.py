@@ -170,7 +170,7 @@ def format_clause_laws(clause_specific_laws: Dict) -> str:
         formatted += f"{clause_num} - {clause_info['title']}\n"
 
         if clause_info.get('laws'):
-            for law in clause_info['laws']:  # 각 조항당 최대 2개 법률만
+            for law in clause_info['laws']:
                 if hasattr(law, 'metadata'):
                     law_name = law.metadata.get('law_name', '알 수 없음')
                     article = law.metadata.get('article_number', '')
